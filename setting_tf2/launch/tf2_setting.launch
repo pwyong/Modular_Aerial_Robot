@@ -1,0 +1,6 @@
+<launch>
+    <node pkg="setting_tf2" type="setting_world_tf" name="setting_world_tf_node"/>
+    <!-- <node pkg="setting_tf2" type="setting_t265_tf" name="setting_t265_tf_node"/> -->
+    <node pkg="setting_tf2" type="setting_t4_tf" name="setting_t4_tf_node"/>
+    <node pkg="setting_tf2" type="tf_listener" name="pos_listener"/>
+</launch>
