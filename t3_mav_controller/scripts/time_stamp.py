@@ -17,7 +17,7 @@ bag=rosbag.Bag(filename)
 np_times=None
 
 for topic,msg,t in bag.read_messages():
-    if topic=="/sbus":
+    if topic=="/gx5/imu/data":
         np_time=np.array([[0.0, 0.0]])
         np_time[0,0]=t.secs
         np_time[0,1]=t.nsecs

@@ -27,6 +27,8 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 
+#include "nav_msgs/Odometry.h"
+
 double freq=200;//controller loop frequency
 
 uint16_t Sbus[8];
@@ -43,7 +45,13 @@ geometry_msgs::Vector3 imu_ang_vel;
 geometry_msgs::Vector3 imu_lin_acc;
 geometry_msgs::Vector3 angle_d;
 geometry_msgs::Vector3 pos;
+geometry_msgs::Vector3 t265_lin_vel;
+geometry_msgs::Vector3 t265_ang_vel;
+geometry_msgs::Vector3 lin_vel;
 geometry_msgs::Quaternion rot;
+geometry_msgs::Quaternion desired_value;
+geometry_msgs::Vector3 integrator;
+
 geometry_msgs::Vector3 t265_att;
 geometry_msgs::Vector3 filtered_angular_rate;
 std_msgs::Float32 altitude_d;
@@ -67,6 +75,7 @@ double tau_p_d = 0;//pitch desired torque(N.m)
 
 double Thrust_d = 0;//altitiude desired thrust(N)
 double prev_z=0;
+double z_vel=0;
 //ud_cmd
 
 double r_d = 0;//desired roll angle
@@ -106,23 +115,23 @@ double servo_limit=0.3;
 //Control gains===========================================
 
 //integratior(PID) limitation
-double integ_limit=2;
+double integ_limit=10;
 double z_integ_limit=100;
 
 //Roll, Pitch PID gains
 double Pa=3.0;
-double Ia=0.01;
-double Da=0.4;
+double Ia=0.7;
+double Da=0.6;
 
 
 //Yaw PID gains
-double Py=0.7;
+double Py=3.0;
 double Dy=0.1;
 
 //Altitude PID gains
-double Pz=10.0;
+double Pz=11.0;
 double Iz=3.0;
-double Dz=4.0;
+double Dz=11.0;
 //--------------------------------------------------------
 
 //Servo angle=============================================
@@ -146,6 +155,7 @@ void loopCallback(const std_msgs::Int16& time);
 void posCallback(const geometry_msgs::Vector3& msg);
 void rotCallback(const geometry_msgs::Quaternion& msg);
 void filterCallback(const sensor_msgs::Imu& msg);
+void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg);
 void setCM();
 
 ros::Publisher PWMs;
@@ -154,12 +164,21 @@ ros::Publisher euler;
 ros::Publisher desired_angle;
 ros::Publisher desired_altitude;
 ros::Publisher Forces;
+ros::Publisher desired_torque;
+ros::Publisher i_result;
 
+//Control Matrix---------------------------------------
 Eigen::Matrix4d CM;
 Eigen::Matrix4d invCM;
 Eigen::Vector4d u;
 Eigen::Vector4d F;
+//-----------------------------------------------------
 
+//Linear_velocity--------------------------------------
+Eigen::Vector3d cam_v;
+Eigen::Matrix3d R;
+Eigen::Vector3d v;
+//-----------------------------------------------------
 
 int main(int argc, char **argv){
 	
@@ -171,25 +190,28 @@ int main(int argc, char **argv){
 
     ros::NodeHandle nh;
 
-    PWMs = nh.advertise<std_msgs::Int16MultiArray>("PWMs", 1000);
+    PWMs = nh.advertise<std_msgs::Int16MultiArray>("PWMs", 1);
     goal_dynamixel_position_  = nh.advertise<sensor_msgs::JointState>("goal_dynamixel_position",1000);
-	euler = nh.advertise<geometry_msgs::Vector3>("angle",1000);
+	euler = nh.advertise<geometry_msgs::Vector3>("angle",1);
 	desired_angle = nh.advertise<geometry_msgs::Vector3>("desired_angle",1000);
 	desired_altitude = nh.advertise<std_msgs::Float32>("desired_altitude",1000);
 	Forces = nh.advertise<geometry_msgs::Quaternion>("Forces",1000);
+	desired_torque = nh.advertise<geometry_msgs::Quaternion>("torque_d",1000);
+	i_result = nh.advertise<geometry_msgs::Vector3>("i_result",1000);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",1000,jointstateCallback);
-    ros::Subscriber att = nh.subscribe("/"+deviceName+"/imu/data",1000,imu_Callback);
+    ros::Subscriber att = nh.subscribe("/"+deviceName+"/imu/data",1,imu_Callback);
     ros::Subscriber rc_in = nh.subscribe("/sbus",1000,sbusCallback);
 	ros::Subscriber loop_timer = nh.subscribe("/loop",1000,loopCallback);
 	ros::Subscriber t265_pos=nh.subscribe("/t265_pos",1000,posCallback);
 	ros::Subscriber t265_rot=nh.subscribe("/t265_rot",1000,rotCallback);
+	ros::Subscriber t265_odom=nh.subscribe("/rs_t265/odom/sample",1000,t265OdomCallback);
 	
 	ros::Time begin;
 	ros::Time end;
 
     ros::Rate loop_rate(200);
-
+    //ros::spin();
     while(ros::ok()){
 		begin = ros::Time::now();
 		// ROS_INFO("%f",CM(2,1));  
@@ -257,6 +279,8 @@ int main(int argc, char **argv){
 		Forces.publish(Force);
 		desired_altitude.publish(altitude_d);
 		goal_dynamixel_position_.publish(servo_msg_create(theta2_command,theta1_command));
+		desired_torque.publish(desired_value);
+		i_result.publish(integrator);
         // ROS_INFO("%d %d %d %d",PWMs_cmd.data[0],PWMs_cmd.data[1],PWMs_cmd.data[2],PWMs_cmd.data[3]);
 		
 		// std::cout<<F.transpose()<< "\n" <<std::endl;
@@ -282,7 +306,7 @@ void rpyT_ctrl(double roll_d, double pitch_d, double yaw_d, double altitude_d) {
 	double e_p = pitch_d - imu_rpy.y;
 	double e_y = yaw_d - imu_rpy.z;
 	double e_z = altitude_d - pos.z;
-	double delta_z=pos.z-prev_z;
+	//double delta_z=pos.z-prev_z;
 	
 
 	e_r_i += e_r * ((double)1 / freq);
@@ -291,13 +315,16 @@ void rpyT_ctrl(double roll_d, double pitch_d, double yaw_d, double altitude_d) {
 	if (fabs(e_p_i) > integ_limit)	e_p_i = (e_p_i / fabs(e_p_i)) * integ_limit;
 	e_z_i += e_z * ((double)1 / freq);
 	if (fabs(e_z_i) > z_integ_limit) e_z_i = (e_z_i / fabs(e_z_i)) * z_integ_limit;
+	integrator.x=e_r_i;
+	integrator.y=e_p_i;
+	integrator.z=e_z_i;
 
 
-	tau_r_d = Pa * e_r + Ia * e_r_i + Da * (-imu_ang_vel.x) - (double)0.4;
-	tau_p_d = Pa * e_p + Ia * e_p_i + Da * (-imu_ang_vel.y) + (double)0.2; 
+	tau_r_d = Pa * e_r + Ia * e_r_i + Da * (-imu_ang_vel.x);// - (double)0.5;
+	tau_p_d = Pa * e_p + Ia * e_p_i + Da * (-imu_ang_vel.y);// + (double)0.2; 
 	
 	if(Sbus[5]>1500){
-		Thrust_d =-(Pz * e_z + Iz * e_z_i - Dz * delta_z*freq+mass*g);
+		Thrust_d =-(Pz * e_z + Iz * e_z_i - Dz * v(2) + mass*g);
 		// ROS_INFO("Altitude Control!!");
 	}
 	else{
@@ -313,7 +340,10 @@ void rpyT_ctrl(double roll_d, double pitch_d, double yaw_d, double altitude_d) {
 	// ROS_INFO("tr:%lf, tp:%lf, ty:%lf, Thrust_d:%lf", tau_r_d, tau_p_d, tau_y_d, Thrust_d);
 	// ROS_INFO("%f",Dz*freq*delta_z);
 	ud_to_PWMs(tau_r_d, tau_p_d, tau_y_d, Thrust_d);
-	prev_z=pos.z;
+	desired_value.x=tau_r_d;
+	desired_value.y=tau_p_d;
+	desired_value.z=tau_y_d;
+	desired_value.w=Thrust_d;
 }
 
  
@@ -325,7 +355,7 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 	F3 = -((double)0.5 / l_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
 	F4 = -((double)0.5 / l_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
 
-    F=invCM*u;
+    	F=invCM*u;
 	// ROS_INFO("F1:%lf, F2:%lf, F3:%lf, F4:%lf", F1, F2, F3, F4);/
 	PWMs_cmd.data.resize(4);
 	// PWMs_cmd.data[0] = 1000;
@@ -443,8 +473,12 @@ void posCallback(const geometry_msgs::Vector3& msg){
 	pos.z=msg.z;
 
 	// ROS_INFO("Translation - [x: %f  y:%f  z:%f]",pos.x,pos.y,pos.z);
-	// ROS_INFO("posCallback time : %f",(((double)ros::Time::now().sec-(double)posTimer.sec)+((double)ros::Time::now().nsec-(double)posTimer.nsec)/1000000000.));
+	/*double dt = ((double)ros::Time::now().sec-(double)posTimer.sec)+((double)ros::Time::now().nsec-(double)posTimer.nsec)/1000000000.;
+	z_vel = (pos.z-prev_z)/dt;
 	posTimer = ros::Time::now();
+	prev_z = pos.z;*/
+	//ROS_INFO("z_vel : %f",z_vel);
+
 }
 
 void rotCallback(const geometry_msgs::Quaternion& msg){
@@ -458,5 +492,18 @@ void rotCallback(const geometry_msgs::Quaternion& msg){
 
 	tf::Matrix3x3(quat).getRPY(t265_att.x,t265_att.y,t265_att.z);
 	// ROS_INFO("Rotation - [r: %f  p: %f  y:%f]",t265_att.x,t265_att.y,t265_att.z);
+}
+
+
+
+void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg){
+	t265_lin_vel=msg->twist.twist.linear;
+	t265_ang_vel=msg->twist.twist.angular;
+	cam_v << t265_lin_vel.x, t265_lin_vel.y, t265_lin_vel.z;
+	R << -cos(-pi/4.), -sin(-pi/4.),  0.,
+ 	     -sin(-pi/4.),  cos(-pi/4.),  0.,
+	              0.,          0., -1.;
+	v = R*cam_v;
+	//ROS_INFO("Linear_velocity - [x: %f  y: %f  z:%f]",v(0),v(1),v(2));
 }
 
