@@ -4,7 +4,7 @@
     </include>
 
     <!-- Dynamixel Workbench Controller -->
-    <include file="$(find dynamixel_workbench_controllers)/launch/position_control.launch">
+    <!-- <include file="$(find dynamixel_workbench_controllers)/launch/position_control.launch">
         <arg name="device_name"        		default="/dev/ttyU2D2"/>
         <arg name="baud_rate"   		default="4500000"/>
 	<arg name="profile_velocity"		default="0"/>
@@ -13,7 +13,7 @@
 	<arg name="position_i_gain"		default="300"/>
 	<arg name="position_d_gain"		default="100"/>
 
-    </include>
+    </include> -->
 
     <!-- ros_mscl -->
     <include file="$(find ros_mscl)/launch/microstrain.launch">
@@ -21,10 +21,10 @@
         <arg name="port"             default = "/dev/3dm-gx4-25" />
         <arg name="baudrate"         default = "921600" />
         <arg name="debug"            default = "false" />
-        <arg name="diagnostics"      default = "true" />
+        <arg name="diagnostics"      default = "false" />
         <arg name="imu_frame_id"     default = "sensor" />
         <arg name="imu_data_rate"    default = "250" />
-        <arg name="filter_data_rate" default = "250" />
+        <arg name="filter_data_rate" default = "10" />
         <arg name="gnss1_frame_id"   default = "gnss1_antenna_wgs84" />
         <arg name="gnss2_frame_id"   default = "gnss2_antenna_wgs84" />
         <arg name="filter_frame_id"  default = "sensor_wgs84" />
