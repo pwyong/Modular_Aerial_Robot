@@ -17,38 +17,32 @@ bag=rosbag.Bag(filename)
 np_times=None
 
 for topic,msg,t in bag.read_messages():
-    if topic=="/t265_rot":
-        np_time=np.array([[0.0, 0.0]])
-        np_time[0,0]=t.secs
-        np_time[0,1]=t.nsecs
+    if topic=="/loop":
+        np_time=np.array([[0.0, 0.0, 0.0]])
+	np_time[0,0]=msg.data
+        np_time[0,1]=t.secs
+        np_time[0,2]=t.nsecs
         if np_times is None:
             np_times=np_time
         else:
             np_times=np.append(np_times,np_time,axis=0)
 
-start_sec=np_times[0,0]
-start_nsec=np_times[0,1]
+start_sec=np_times[0,1]
+start_nsec=np_times[0,2]
 t=np.zeros(np_times.shape[0])
 for i in range(np_times.shape[0]):
-    t[i]=(np_times[i,0]-start_sec)+(np_times[i,1]-start_nsec)/1000000000.0
+    t[i]=(np_times[i,1]-start_sec)+(np_times[i,2]-start_nsec)/1000000000.0
 
-time_diff=np.zeros(len(t)-1)
-for i in range(len(t)):
-    if i+1 == len(t):
-        break
-    time_diff[i]=t[i+1]-t[i]
-
-x=np.arange(0,len(time_diff),1)
 ax1=plt.subplot(1,1,1)
-plt.plot(x,time_diff,".",linewidth=0.5)
+plt.plot(np_times[:,0],".",linewidth=0.5)
 # plt.ylim([0,0.01])
-plt.ylabel('time_diff')
+plt.ylabel('arduino')
 plt.xticks(visible=False)
 plt.title("times")
 plt.grid(True)
 
 plt.tight_layout()
-plt.savefig('{0}-{1}.png'.format(filename,'time'),dpi=200)
+plt.savefig('{0}-{1}.png'.format(filename,'arduino'),dpi=200)
 plt.show()
 
 

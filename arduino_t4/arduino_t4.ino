@@ -61,6 +61,7 @@
 #include <std_msgs/MultiArrayDimension.h>
 #include <std_msgs/Int16MultiArray.h>
 #include <std_msgs/Int16.h>
+#include <std_msgs/Int32.h>
 //--------------------------------------------------------------------------------------
 
 #if defined(ARDUINO) && ARDUINO >=100
@@ -77,7 +78,7 @@ ros::NodeHandle nh;
 std_msgs::Int16MultiArray sbus_msg;
 ros::Publisher sbus("sbus",&sbus_msg);
 
-std_msgs::Int16 loop_time;
+std_msgs::Int32 loop_time;
 ros::Publisher loop_timer("loop",&loop_time);
 
 //--------------------------------------------------------------------------------------
@@ -268,7 +269,7 @@ ros::Subscriber<std_msgs::Int16MultiArray> PWMs("PWMs", writePWM_Upboard);
 void setup() {
   // For ROS========================================================================
   nh.getHardware()->setBaud(250000);
-//  Serial.begin(250000);
+  Serial.begin(250000);
   Serial1.begin(100000,SERIAL_8E2);
   sbus_msg.data=(short int *)malloc(sizeof(short int) * 8);
   sbus_msg.data_length = 8;
@@ -294,9 +295,9 @@ void setup() {
 }
 
 
-uint32_t sbus_time=0, update_time=0;
+int32_t sbus_time=0, update_time=0,start_time=0;
 void loop() {
-//  uint32_t start_time = micros();
+  start_time = micros();
     if(sbus_time-update_time>20000){
       update_channels();
       sbus_msg.data[0] = channel(1);
@@ -331,5 +332,5 @@ void loop() {
   
   nh.spinOnce();
   delay(2);
-//  loop_time.data = micros()-start_time;
+  loop_time.data = micros()-start_time;
 }

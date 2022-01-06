@@ -1,0 +1,7 @@
+/**
+\mainpage
+\htmlinclude manifest.html
+
+\b ROS-MSCL is a driver for the Lord/Microstrain integrated IMU/GPS sensors.
+
+*/

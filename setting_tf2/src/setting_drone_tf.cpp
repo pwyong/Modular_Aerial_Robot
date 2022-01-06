@@ -7,19 +7,19 @@
 #define PI 3.141592
 
 int main(int argc, char **argv){
-    ros::init(argc,argv,"setting_world_tf");
+    ros::init(argc,argv,"setting_drone_tf");
 
     static tf2_ros::StaticTransformBroadcaster static_broadcaster;
     geometry_msgs::TransformStamped static_transformStamped;
 
     static_transformStamped.header.stamp = ros::Time::now();
     static_transformStamped.header.frame_id="world";
-    static_transformStamped.child_frame_id="rs_t265_odom_frame";
-    static_transformStamped.transform.translation.x=-0.16/4*sqrt(2.0);
-    static_transformStamped.transform.translation.y=3*0.16/4*sqrt(2.0);
-    static_transformStamped.transform.translation.z=0.152;
+    static_transformStamped.child_frame_id="imu";
+    static_transformStamped.transform.translation.x=0.0;
+    static_transformStamped.transform.translation.y=0.0;
+    static_transformStamped.transform.translation.z=0.0;
     tf2::Quaternion quat;
-    quat.setRPY(0.0,0.0,-45.0*PI/180.0);
+    quat.setRPY(0.0,-PI,0.0);
     static_transformStamped.transform.rotation.x=quat.x();
     static_transformStamped.transform.rotation.y=quat.y();
     static_transformStamped.transform.rotation.z=quat.z();

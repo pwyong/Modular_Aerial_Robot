@@ -134,7 +134,7 @@ include_directories(
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 add_executable(setting_world_tf src/setting_world_tf.cpp)
-# add_executable(setting_t265_tf src/setting_t265_tf.cpp)
+add_executable(setting_drone_tf src/setting_drone_tf.cpp)
 add_executable(tf_listener src/tf_listener.cpp)
 add_executable(setting_t4_tf src/setting_t4_tf.cpp)
 
@@ -152,9 +152,9 @@ add_executable(setting_t4_tf src/setting_t4_tf.cpp)
 target_link_libraries(setting_world_tf
   ${catkin_LIBRARIES}
 )
-# target_link_libraries(setting_t265_tf
-#   ${catkin_LIBRARIES}
-# )
+target_link_libraries(setting_drone_tf
+  ${catkin_LIBRARIES}
+)
 target_link_libraries(tf_listener
   ${catkin_LIBRARIES}
 )

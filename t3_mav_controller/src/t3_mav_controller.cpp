@@ -29,11 +29,11 @@
 
 #include "nav_msgs/Odometry.h"
 
-double freq=200;//controller loop frequency
+double freq=100;//controller loop frequency
 
-uint16_t Sbus[8];
+int16_t Sbus[8];
 int16_t PWM_d;
-uint16_t loop_time;
+int16_t loop_time;
 std_msgs::Int16MultiArray PWMs_cmd;
 geometry_msgs::Quaternion Force; //Only for plotting in Python (Hard to use Float32MultiArray)
 
@@ -48,6 +48,8 @@ geometry_msgs::Vector3 pos;
 geometry_msgs::Vector3 t265_lin_vel;
 geometry_msgs::Vector3 t265_ang_vel;
 geometry_msgs::Vector3 lin_vel;
+geometry_msgs::Vector3 ang_vel;
+geometry_msgs::Quaternion t265_quat;
 geometry_msgs::Quaternion rot;
 geometry_msgs::Quaternion desired_value;
 geometry_msgs::Vector3 integrator;
@@ -120,12 +122,12 @@ double z_integ_limit=100;
 
 //Roll, Pitch PID gains
 double Pa=3.0;
-double Ia=0.7;
-double Da=0.6;
+double Ia=0.5;
+double Da=0.5;
 
 
 //Yaw PID gains
-double Py=3.0;
+double Py=2.0;
 double Dy=0.1;
 
 //Altitude PID gains
@@ -157,6 +159,7 @@ void rotCallback(const geometry_msgs::Quaternion& msg);
 void filterCallback(const sensor_msgs::Imu& msg);
 void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg);
 void setCM();
+void publisherSet();
 
 ros::Publisher PWMs;
 ros::Publisher goal_dynamixel_position_;
@@ -166,6 +169,8 @@ ros::Publisher desired_altitude;
 ros::Publisher Forces;
 ros::Publisher desired_torque;
 ros::Publisher i_result;
+ros::Publisher linear_velocity;
+ros::Publisher angular_velocity;
 
 //Control Matrix---------------------------------------
 Eigen::Matrix4d CM;
@@ -176,120 +181,52 @@ Eigen::Vector4d F;
 
 //Linear_velocity--------------------------------------
 Eigen::Vector3d cam_v;
-Eigen::Matrix3d R;
+Eigen::Matrix3d R_v;
 Eigen::Vector3d v;
+//-----------------------------------------------------
+//Angular_velocity-------------------------------------
+Eigen::Vector3d cam_w;
+Eigen::Matrix3d R_w;
+Eigen::Vector3d w;
+//-----------------------------------------------------
+//Attitude--------------------------------------
+Eigen::Vector3d cam_att;
+Eigen::Matrix3d R_a;
+Eigen::Vector3d t4_att;
 //-----------------------------------------------------
 
 int main(int argc, char **argv){
 	
-    ros::init(argc, argv,"t3_mav_controller");
+    	ros::init(argc, argv,"t3_mav_controller");
 
-    std::string deviceName;
-    ros::NodeHandle params("~");
-    params.param<std::string>("device", deviceName, "/gx5");
+    	std::string deviceName;
+    	ros::NodeHandle params("~");
+    	params.param<std::string>("device", deviceName, "/gx5");
 
-    ros::NodeHandle nh;
+    	ros::NodeHandle nh;
 
-    PWMs = nh.advertise<std_msgs::Int16MultiArray>("PWMs", 1);
-    goal_dynamixel_position_  = nh.advertise<sensor_msgs::JointState>("goal_dynamixel_position",1000);
+    	PWMs = nh.advertise<std_msgs::Int16MultiArray>("PWMs", 1);
+    	goal_dynamixel_position_  = nh.advertise<sensor_msgs::JointState>("goal_dynamixel_position",100);
 	euler = nh.advertise<geometry_msgs::Vector3>("angle",1);
-	desired_angle = nh.advertise<geometry_msgs::Vector3>("desired_angle",1000);
-	desired_altitude = nh.advertise<std_msgs::Float32>("desired_altitude",1000);
-	Forces = nh.advertise<geometry_msgs::Quaternion>("Forces",1000);
-	desired_torque = nh.advertise<geometry_msgs::Quaternion>("torque_d",1000);
-	i_result = nh.advertise<geometry_msgs::Vector3>("i_result",1000);
+	desired_angle = nh.advertise<geometry_msgs::Vector3>("desired_angle",100);
+	desired_altitude = nh.advertise<std_msgs::Float32>("desired_altitude",100);
+	Forces = nh.advertise<geometry_msgs::Quaternion>("Forces",100);
+	desired_torque = nh.advertise<geometry_msgs::Quaternion>("torque_d",100);
+	i_result = nh.advertise<geometry_msgs::Vector3>("i_result",100);
+	linear_velocity = nh.advertise<geometry_msgs::Vector3>("lin_vel",100);
+	angular_velocity = nh.advertise<geometry_msgs::Vector3>("gyro",100);
 
-    ros::Subscriber dynamixel_state = nh.subscribe("joint_states",1000,jointstateCallback);
-    ros::Subscriber att = nh.subscribe("/"+deviceName+"/imu/data",1,imu_Callback);
-    ros::Subscriber rc_in = nh.subscribe("/sbus",1000,sbusCallback);
-	ros::Subscriber loop_timer = nh.subscribe("/loop",1000,loopCallback);
-	ros::Subscriber t265_pos=nh.subscribe("/t265_pos",1000,posCallback);
-	ros::Subscriber t265_rot=nh.subscribe("/t265_rot",1000,rotCallback);
-	ros::Subscriber t265_odom=nh.subscribe("/rs_t265/odom/sample",1000,t265OdomCallback);
+    	ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback);
+    	ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback);
+    	ros::Subscriber rc_in = nh.subscribe("/sbus",100,sbusCallback);
+	//ros::Subscriber loop_timer = nh.subscribe("/loop",100,loopCallback);
+	ros::Subscriber t265_pos=nh.subscribe("/t265_pos",100,posCallback);
+	ros::Subscriber t265_rot=nh.subscribe("/t265_rot",100,rotCallback);
+	ros::Subscriber t265_odom=nh.subscribe("/rs_t265/odom/sample",100,t265OdomCallback);
 	
-	ros::Time begin;
-	ros::Time end;
-
-    ros::Rate loop_rate(200);
-    //ros::spin();
-    while(ros::ok()){
-		begin = ros::Time::now();
-		// ROS_INFO("%f",CM(2,1));  
-    	//Publish data
-		
-		if(Sbus[6]>1500){
-			theta2_command=servo_limit*(((double)Sbus[1]-(double)1500)/(double)500);
-			theta1_command=servo_limit*(((double)Sbus[3]-(double)1500)/(double)500);
-			r_d=0.0;
-			p_d=0.0;
-		}
-		else{
-			r_d=rp_limit*(((double)Sbus[3]-(double)1500)/(double)500);
-			p_d=rp_limit*(((double)Sbus[1]-(double)1500)/(double)500);
-			theta1_command=0.0;
-			theta2_command=0.0;
-		}
-		y_d_tangent=y_vel_limit*(((double)Sbus[0]-(double)1500)/(double)500);
-		if(fabs(y_d_tangent)<y_d_tangent_deadzone || fabs(y_d_tangent)>y_vel_limit) y_d_tangent=0;
-		y_d+=y_d_tangent;
-		
-		z_d=altitude_limit*(((double)Sbus[2]-(double)1500)/(double)500)+altitude_limit;
-		T_d =-T_limit*(((double)Sbus[2]-(double)1500)/(double)500)-T_limit;
-
-		if(Sbus[4]<1500){
-			PWMs_cmd.data.resize(4);
-			PWMs_cmd.data[0] = 1000;
-			PWMs_cmd.data[1] = 1000;
-			PWMs_cmd.data[2] = 1000;
-			PWMs_cmd.data[3] = 1000;
-			y_d=imu_rpy.z;	//[J]This line ensures that yaw desired right after disabling the kill switch becomes current yaw attitude
-			initial_z=pos.z;
-			e_r_i = 0;
-			e_p_i = 0;
-			e_z_i = 0;
-			start_flag=false;
-		}
-		else{
-			// ROS_INFO("r:%lf, p:%lf, y:%lf T:%lf", r_d, p_d, y_d, T_d);
-			if(Sbus[5]>1500){
-				rpyT_ctrl(r_d, p_d, y_d, z_d);
-			}
-			else{
-				rpyT_ctrl(r_d, p_d, y_d, T_d);	
-			}
-			
-			
-			// PWMs_cmd.data.resize(4);
-			// PWMs_cmd.data[0] = 1000;
-			// PWMs_cmd.data[1] = 1000;
-			// PWMs_cmd.data[2] = 1000;
-			// PWMs_cmd.data[3] = 1000;
-			
-			
-		}
-
-		setCM();
-		angle_d.x=r_d;
-		angle_d.y=p_d;
-		angle_d.z=y_d;
-		altitude_d.data=z_d;
-		PWMs.publish(PWMs_cmd);
-		euler.publish(imu_rpy);
-		desired_angle.publish(angle_d);
-		Forces.publish(Force);
-		desired_altitude.publish(altitude_d);
-		goal_dynamixel_position_.publish(servo_msg_create(theta2_command,theta1_command));
-		desired_torque.publish(desired_value);
-		i_result.publish(integrator);
-        // ROS_INFO("%d %d %d %d",PWMs_cmd.data[0],PWMs_cmd.data[1],PWMs_cmd.data[2],PWMs_cmd.data[3]);
-		
-		// std::cout<<F.transpose()<< "\n" <<std::endl;
-		ros::spinOnce();
-		loop_rate.sleep();
-        end = ros::Time::now();
-		// ROS_INFO("loop time : %f",((double)end.sec-(double)begin.sec)+((double)end.nsec-(double)begin.nsec)/1000000000.);
-    }
-    return 0;
+	ros::Timer timerPublish = nh.createTimer(ros::Duration(1.0/100.0),std::bind(publisherSet));
+    	ros::spin();
+    	return 0;
 }
 
 void setCM(){
@@ -389,7 +326,7 @@ double Force_to_PWM(double F) {
 		pwm = param1 + sqrt(param2 * F + param3);
 	}
 	else pwm = param1;
-	if (pwm > 1880)	pwm = 1880;
+	if (pwm > 1900)	pwm = 1900;
 	if(Sbus[5]>1500){
 		if(initial_z>=0){
 			if(z_d<initial_z && !start_flag) {
@@ -487,11 +424,14 @@ void rotCallback(const geometry_msgs::Quaternion& msg){
 	rot.z=msg.z;
 	rot.w=msg.w;
 
+	/*t265_att.x=atan2((rot.y*rot.z+rot.w*rot.x),1.-2.*(rot.z*rot.z+rot.w*rot.w));
+	t265_att.y=asin(2.*(rot.y*rot.w-rot.x*rot.z));
+	t265_att.z=atan2((rot.y*rot.x+rot.z*rot.w),1.-2.*(rot.w*rot.w+rot.x*rot.x));*/
+	
 	tf::Quaternion quat;
 	tf::quaternionMsgToTF(rot,quat);
-
 	tf::Matrix3x3(quat).getRPY(t265_att.x,t265_att.y,t265_att.z);
-	// ROS_INFO("Rotation - [r: %f  p: %f  y:%f]",t265_att.x,t265_att.y,t265_att.z);
+	//ROS_INFO("Attitude - [r: %f  p: %f  y:%f]",t4_att(0),t4_att(1),t4_att(2));	
 }
 
 
@@ -499,11 +439,93 @@ void rotCallback(const geometry_msgs::Quaternion& msg){
 void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg){
 	t265_lin_vel=msg->twist.twist.linear;
 	t265_ang_vel=msg->twist.twist.angular;
+
+	//tf::Matrix3x3(quat).getRPY(cam_att(0),cam_att(1),cam_att(2));
 	cam_v << t265_lin_vel.x, t265_lin_vel.y, t265_lin_vel.z;
-	R << -cos(-pi/4.), -sin(-pi/4.),  0.,
- 	     -sin(-pi/4.),  cos(-pi/4.),  0.,
-	              0.,          0., -1.;
-	v = R*cam_v;
+	R_v << -cos(-pi/4.), -sin(-pi/4.),  0.,
+ 	       -sin(-pi/4.),  cos(-pi/4.),  0.,
+	                0.,          0.,   -1.;
+
+	v = R_v*cam_v;
+        //t4_att = R_a*cam_att;
+	lin_vel.x=v(0);
+	lin_vel.y=v(1);
+	lin_vel.z=v(2);
+	//ROS_INFO("Attitude - [r: %f  p: %f  y:%f]",t4_att(0),t4_att(1),t4_att(2));
 	//ROS_INFO("Linear_velocity - [x: %f  y: %f  z:%f]",v(0),v(1),v(2));
+	//ROS_INFO("Angular_velocity - [x: %f  y: %f  z:%f]",w(0),w(1),w(2));
+}
+
+void publisherSet(){
+    	//Publish data
+		
+	if(Sbus[6]>1500){
+		theta2_command=servo_limit*(((double)Sbus[1]-(double)1500)/(double)500);
+		theta1_command=servo_limit*(((double)Sbus[3]-(double)1500)/(double)500);
+		r_d=0.0;
+		p_d=0.0;
+	}
+	else{
+		r_d=rp_limit*(((double)Sbus[3]-(double)1500)/(double)500);
+		p_d=rp_limit*(((double)Sbus[1]-(double)1500)/(double)500);
+		theta1_command=0.0;
+		theta2_command=0.0;
+	}
+	y_d_tangent=y_vel_limit*(((double)Sbus[0]-(double)1500)/(double)500);
+	if(fabs(y_d_tangent)<y_d_tangent_deadzone || fabs(y_d_tangent)>y_vel_limit) y_d_tangent=0;
+	y_d+=y_d_tangent;
+	
+	z_d=altitude_limit*(((double)Sbus[2]-(double)1500)/(double)500)+altitude_limit;
+	T_d =-T_limit*(((double)Sbus[2]-(double)1500)/(double)500)-T_limit;
+
+	if(Sbus[4]<1500){
+		PWMs_cmd.data.resize(4);
+		PWMs_cmd.data[0] = 1000;
+		PWMs_cmd.data[1] = 1000;
+		PWMs_cmd.data[2] = 1000;
+		PWMs_cmd.data[3] = 1000;
+		y_d=imu_rpy.z;	//[J]This line ensures that yaw desired right after disabling the kill switch becomes current yaw attitude
+		initial_z=pos.z;
+		e_r_i = 0;
+		e_p_i = 0;
+		e_z_i = 0;
+		start_flag=false;
+	}
+	else{
+		// ROS_INFO("r:%lf, p:%lf, y:%lf T:%lf", r_d, p_d, y_d, T_d);
+		if(Sbus[5]>1500){
+			rpyT_ctrl(r_d, p_d, y_d, z_d);
+		}
+		else{
+			rpyT_ctrl(r_d, p_d, y_d, T_d);	
+		}
+		
+		
+		// PWMs_cmd.data.resize(4);
+		// PWMs_cmd.data[0] = 1000;
+		// PWMs_cmd.data[1] = 1000;
+		// PWMs_cmd.data[2] = 1000;
+		// PWMs_cmd.data[3] = 1000;
+		
+		
+	}
+
+	setCM();
+	angle_d.x=r_d;
+	angle_d.y=p_d;
+	angle_d.z=y_d;
+	altitude_d.data=z_d;
+	PWMs.publish(PWMs_cmd);
+	euler.publish(imu_rpy);
+	desired_angle.publish(angle_d);
+	Forces.publish(Force);
+	desired_altitude.publish(altitude_d);
+	goal_dynamixel_position_.publish(servo_msg_create(theta2_command,theta1_command));
+	desired_torque.publish(desired_value);
+	i_result.publish(integrator);
+	linear_velocity.publish(lin_vel);
+	// ROS_INFO("%d %d %d %d",PWMs_cmd.data[0],PWMs_cmd.data[1],PWMs_cmd.data[2],PWMs_cmd.data[3]);
+	// ROS_INFO("loop time : %f",((double)end.sec-(double)begin.sec)+((double)end.nsec-(double)begin.nsec)/1000000000.);
+
 }
 

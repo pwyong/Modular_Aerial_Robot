@@ -15,12 +15,14 @@ find_package(catkin REQUIRED COMPONENTS
   tf
   tf2
   tf2_ros
+  message_generation
 )
 
 find_package(cmake_modules REQUIRED)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 find_package(Eigen REQUIRED)
 include_directories(${Eigen_INCLUDE_DIRS})
+
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -58,8 +60,6 @@ include_directories(${Eigen_INCLUDE_DIRS})
 ## Generate messages in the 'msg' folder
 # add_message_files(
 #   FILES
-#   Message1.msg
-#   Message2.msg
 # )
 
 ## Generate services in the 'srv' folder
@@ -116,7 +116,7 @@ include_directories(${Eigen_INCLUDE_DIRS})
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES t3_mav_controller
-  CATKIN_DEPENDS roscpp std_msgs
+  CATKIN_DEPENDS roscpp std_msgs message_runtime
   DEPENDS system_lib
   DEPENDS Eigen
 )
@@ -156,7 +156,6 @@ add_executable(t3_mav_controller_node src/t3_mav_controller.cpp)
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 add_dependencies(t3_mav_controller_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
 ## Specify libraries to link a library or executable target against
 target_link_libraries(t3_mav_controller_node
   ${catkin_LIBRARIES}
