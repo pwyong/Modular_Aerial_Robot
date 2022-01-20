@@ -51,9 +51,16 @@ t=np.zeros(np_angles.shape[0],dtype='float32')
 for i in range(np_angles.shape[0]):
     t[i]=(np_angles[i,3]-start_sec)+(np_angles[i,4]-start_nsec)/1000000000.0
 
+start_sec_2=np_angle_ds[0,3]
+start_nsec_2=np_angle_ds[0,4]
+t_2=np.zeros(np_angle_ds.shape[0],dtype='float32')
+for i in range(np_angle_ds.shape[0]):
+    t_2[i]=(np_angle_ds[i,3]-start_sec)+(np_angle_ds[i,4]-start_nsec)/1000000000.0
+
+
 ax1=plt.subplot(3,1,1)
 plt.plot(t,np_angles[:,0],'r',linewidth=0.5)
-plt.plot(t,np_angle_ds[:np_angles.shape[0],0],'k',linewidth=0.5)
+plt.plot(t_2,np_angle_ds[:,0],'k',linewidth=0.5)
 plt.ylabel('Roll(rad)')
 plt.ylim([-0.5,0.5])
 plt.xticks(visible=False)
@@ -62,7 +69,7 @@ plt.grid(True)
 
 ax2=plt.subplot(3,1,2,sharex=ax1)
 plt.plot(t,np_angles[:,1],'g',linewidth=0.5)
-plt.plot(t,np_angle_ds[:np_angles.shape[0],1],'k',linewidth=0.5)
+plt.plot(t_2,np_angle_ds[:,1],'k',linewidth=0.5)
 plt.ylabel('Pitch(rad)')
 plt.ylim([-0.5,0.5])
 plt.xticks(visible=False)
@@ -70,7 +77,7 @@ plt.grid(True)
 
 ax3=plt.subplot(3,1,3,sharex=ax1)
 plt.plot(t,np_angles[:,2],'b',linewidth=0.5)
-plt.plot(t,np_angle_ds[:np_angles.shape[0],2],'k',linewidth=0.5)
+plt.plot(t_2,np_angle_ds[:,2],'k',linewidth=0.5)
 plt.xlabel('time(s)')
 plt.ylabel('Yaw(rad)')
 plt.ylim([-0.5,0.5])

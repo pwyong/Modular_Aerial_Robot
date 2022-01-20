@@ -23,7 +23,7 @@ int main(int argc, char** argv){
 	geometry_msgs::TransformStamped transformStamped2;
         try{
             transformStamped = tfBuffer.lookupTransform("t4","world",ros::Time(0));
-	    transformStamped2 = tfBuffer2.lookupTransform("t4","imu",ros::Time(0));
+	    transformStamped2 = tfBuffer2.lookupTransform("drone_world","t4",ros::Time(0));
         }
         catch(tf2::TransformException &ex){
             ROS_WARN("%s",ex.what());
@@ -34,9 +34,9 @@ int main(int argc, char** argv){
         geometry_msgs::Vector3 trans;
         geometry_msgs::Quaternion quat;
 
-        trans.x=transformStamped.transform.translation.x;
-        trans.y=transformStamped.transform.translation.y;
-        trans.z=transformStamped.transform.translation.z;
+        trans.x=transformStamped2.transform.translation.x;
+        trans.y=transformStamped2.transform.translation.y;
+        trans.z=transformStamped2.transform.translation.z;
 
         quat.x=transformStamped2.transform.rotation.x;
         quat.y=transformStamped2.transform.rotation.y;

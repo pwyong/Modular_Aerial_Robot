@@ -9,7 +9,7 @@
   <arg name="name"                   default = "gx5" />
   <arg name="port"                   default = "/dev/3dm-gx4-25" />
   <arg name="aux_port"               default = "/dev/ttyACM1" />
-  <arg name="baudrate"               default = "921600" />
+  <arg name="baudrate"               default = "115200" />
   <arg name="debug"                  default = "false" />
   <arg name="diagnostics"            default = "false" />
   <arg name="imu_frame_id"           default = "sensor" />
@@ -134,14 +134,14 @@
     <!-- If enabled, this message can be used to validate time IMU time syncronzation with gps -->
     <!-- It is most useful when using an external timesource and external PPS-->
     <!-- (see: filter_enable_external_gps_time_update) -->
-    <param name="publish_gps_corr"  value="true" type="bool" />
+    <param name="publish_gps_corr"  value="false" type="bool" />
 
 
     <!-- ****************************************************************** -->
     <!-- GNSS Settings (only applicable for devices with GNSS) -->
     <!-- ****************************************************************** -->
 
-    <param name="publish_gnss1"   value="true"                  type="bool" />
+    <param name="publish_gnss1"   value="false"                  type="bool" />
     <param name="gnss1_data_rate" value="2"                     type="int" />
 
     <!-- Antenna #1 lever arm offset vector
@@ -152,7 +152,7 @@
     <rosparam param="gnss1_antenna_offset"> [0.0, -0.7, -1.0]</rosparam>
 
     <!-- GNSS2 settings are only applicable for multi-GNSS systems (e.g. GQ7) -->
-    <param name="publish_gnss2"   value="true"                  type="bool" />
+    <param name="publish_gnss2"   value="false"                  type="bool" />
     <param name="gnss2_data_rate" value="2"                     type="int" />
 
     <!-- Antenna #2 lever arm offset vector (In the vehicle frame wrt IMU origin (meters) )-->
@@ -222,7 +222,7 @@
     <param name="filter_adaptive_time_limit_ms" value="15000" type="int" />
 
     <!-- Publish Filter Aiding Summary -->
-    <param name="publish_aiding_measurement_summary" value="true" type="bool" />
+    <param name="publish_aiding_measurement_summary" value="false" type="bool" />
 
     <!-- (GQ7 only) Aiding measurement control -->
     <param name="filter_enable_gnss_pos_vel_aiding"      value="true"  type="bool" />

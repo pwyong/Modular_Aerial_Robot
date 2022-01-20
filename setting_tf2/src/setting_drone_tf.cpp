@@ -14,7 +14,7 @@ int main(int argc, char **argv){
 
     static_transformStamped.header.stamp = ros::Time::now();
     static_transformStamped.header.frame_id="world";
-    static_transformStamped.child_frame_id="imu";
+    static_transformStamped.child_frame_id="drone_world";
     static_transformStamped.transform.translation.x=0.0;
     static_transformStamped.transform.translation.y=0.0;
     static_transformStamped.transform.translation.z=0.0;
