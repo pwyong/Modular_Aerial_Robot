@@ -53,13 +53,13 @@
 
     	<!--attitude_rp gains-->
     	<param name="attitude_rp_P_gain"	value="4.5"/>
-    	<param name="attitude_rp_I_gain"	value="0.4"/>
-    	<param name="attitude_rp_D_gain"	value="0.7"/>
+    	<param name="attitude_rp_I_gain"	value="0.5"/>
+    	<param name="attitude_rp_D_gain"	value="0.6"/>
 
 	<!--attitude_y gain-->
 	<param name="attitude_y_P_gain"		value="2.0"/>
 	<!--<param name="attitude_y_I_gain"		value="0"/>-->
-	<param name="attitude_y_D_gain"		value="0.1"/>
+	<param name="attitude_y_D_gain"		value="0.3"/>
 
 	<!--Altitude gains-->
 	<param name="altitude_P_gain"		value="20.0"/>
@@ -67,9 +67,15 @@
 	<param name="altitude_D_gain"		value="15.0"/>
 
 	<!--Position gains-->
-	<param name="position_P_gain"		value="5.0"/>	
+	<param name="position_P_gain"		value="7.0"/>	
 	<param name="position_I_gain"		value="0.1"/>	
-	<param name="position_D_gain"		value="3.0"/>	
+	<param name="position_D_gain"		value="6.0"/>	
+
+	<!--Center of mass-->
+	<param name="x_center_of_mass"		value="0.0"/>	
+	<param name="y_center_of_mass"		value="0.0"/>	
+	<param name="z_center_of_mass"		value="-0.05"/>	
+
 
     <node name="t3_mav_controller_node"  pkg="t3_mav_controller" type="t3_mav_controller_node"  output="screen"/>
 

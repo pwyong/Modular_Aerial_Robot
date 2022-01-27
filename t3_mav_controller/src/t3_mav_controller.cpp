@@ -106,7 +106,7 @@ double beta = 0;
 //General dimensions
 
 static double l_arm = 0.109;// m // diagonal length between thruster : 218mm;
-static double l_servo = 0.045;
+static double l_servo = -0.045;
 static double mass = 1.992;//(Kg)
 double initial_z = 0;
 
@@ -125,10 +125,14 @@ static double y_vel_limit = 0.01;//(rad/s)
 static double y_d_tangent_deadzone = (double)0.05 * y_vel_limit;//(rad/s)
 static double T_limit = 17;//(N)
 static double altitude_limit = 1;//(m)
-static double XY_limit = 1;
+static double XY_limit = 0.5;
 static double servo_limit=0.3;
 static double XY_ddot_limit=2;
 static double alpha_beta_limit=1;
+
+double x_c=0.0;
+double y_c=0.0;
+double z_c=0.0;
 //--------------------------------------------------------
 
 //Control gains===========================================
@@ -262,6 +266,11 @@ int main(int argc, char **argv){
 		Pp=nh.param<double>("position_P_gain",3.0);
 		Ip=nh.param<double>("position_I_gain",0.1);
 		Dp=nh.param<double>("position_D_gain",5.0);
+
+		//Center of Mass
+		x_c=nh.param<double>("x_center_of_mass",0.0);
+		y_c=nh.param<double>("y_center_of_mass",0.0);
+		z_c=nh.param<double>("z_center_of_mass",0.0);
 	//----------------------------------------------------------
 	
     	PWMs = nh.advertise<std_msgs::Int16MultiArray>("PWMs", 1);
@@ -353,10 +362,10 @@ void publisherSet(){
 }
 
 void setCM(){
-	CM << l_servo*theta1, l_arm, l_servo*theta1, -l_arm,
-	      l_arm, -l_servo*theta2, -l_arm, -l_servo*theta2,
-		  -b_over_k_ratio+l_arm*theta1, b_over_k_ratio-l_arm*theta2, -b_over_k_ratio-l_arm*theta1, b_over_k_ratio+l_arm*theta2,
-		  -1.0, -1.0, -1.0, -1.0;
+	CM << y_c+(l_servo+z_c)*theta1, l_arm+y_c, y_c+(l_servo+z_c)*theta1, y_c-l_arm,
+	      l_arm-x_c, -x_c-(l_servo-z_c)*theta2, -l_arm-x_c, -x_c-(l_servo-z_c)*theta2,
+	      -b_over_k_ratio+(l_arm-x_c)*theta1, b_over_k_ratio-(l_arm+y_c)*theta2, -b_over_k_ratio-(l_arm+x_c)*theta1, b_over_k_ratio+(l_arm-y_c)*theta2,
+	      -1.0, -1.0, -1.0, -1.0;
 	invCM=CM.inverse();
 }
 
