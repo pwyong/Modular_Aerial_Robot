@@ -23,6 +23,7 @@
 // 2017.01.18 Code modified for Arduino Due
 // 2018.08.09 Code modified to operate under the ROS system w. rosserial
 // 2018.08.15 Remapped the analogwrite->PWM relationship
+// 2022.06.24 Applied voltage sensor
 
 // Seung Jae Lee
 // Seoul National University
@@ -52,13 +53,18 @@
 ros::NodeHandle nh;
 
 std_msgs::Int16MultiArray sbus_msg;
+std_msgs::Int16 voltage_msg;
 ros::Publisher sbus("sbus",&sbus_msg);
+ros::Publisher battery("battery",&voltage_msg);
 //--------------------------------------------------------------------------------------
 
 // Set S.BUS=============================================================
 #define SBUS_SIGNAL_OK          0x00
 #define SBUS_SIGNAL_LOST        0x01
 #define SBUS_SIGNAL_FAILSAFE    0x03
+//-----------------------------------------------------------------------
+// Battery Voltage Check=================================================
+#define BATTERY_V_PIN            A11
 
 uint8_t sbus_data[25] = {0x0f,0x01,0x04,0x20,0x00,0xff,0x07,0x40,0x00,0x02,0x10,0x80,0x2c,0x64,0x21,0x0b,0x59,0x08,0x40,0x00,0x02,0x10,0x80,0x00,0x00};
 int16_t channels[18]  = {1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,1023,0,0};
@@ -158,12 +164,16 @@ void setup() {
   nh.getHardware()->setBaud(57600);
 //  Serial.begin(250000);
   Serial1.begin(100000,SERIAL_8E2);
+  pinMode(BATTERY_V_PIN,INPUT);
+  
   sbus_msg.data=(short int *)malloc(sizeof(short int) * 9);
   sbus_msg.data_length = 9;
   nh.initNode();
   nh.advertise(sbus);
+  nh.advertise(battery);
   //--------------------------------------------------------------------------------
- 
+  analogReadResolution(12);
+  analogWriteResolution(12);
 }
 
 
@@ -181,10 +191,11 @@ void loop() {
   sbus_msg.data[6] = channel(7);
   sbus_msg.data[7] = channel(8);
   sbus_msg.data[8] = channel(10);
-  
-  sbus.publish(&sbus_msg);
-  
-  nh.spinOnce();
 
+  voltage_msg.data = analogRead(BATTERY_V_PIN);
+  sbus.publish(&sbus_msg);
+  battery.publish(&voltage_msg);
+  nh.spinOnce();
+  
   while(micros()-start_time<20000);
 }

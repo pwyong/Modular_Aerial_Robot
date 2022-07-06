@@ -1,9 +1,11 @@
 //2022.05.16 Coaxial-Octorotor version
+//2022.06.23 Ground Station Application
 
 #include <ros/ros.h>
 #include <iostream>
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Dense>
+//#include <eigne3/Eigen/QR>
 #include <std_msgs/String.h>
 #include <vector>
 #include <cmath>
@@ -29,6 +31,8 @@
 #include <geometry_msgs/Transform.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/static_transform_broadcaster.h>
+#include "FAC_MAV/ArmService.h"
+#include "FAC_MAV/KillService.h"
 
 #include "nav_msgs/Odometry.h"
 
@@ -63,6 +67,8 @@ geometry_msgs::Vector3 F_total;
 geometry_msgs::Vector3 t265_att;
 geometry_msgs::Vector3 filtered_angular_rate;
 std_msgs::Float32 altitude_d;
+std_msgs::Float32 battery_voltage_msg;
+std_msgs::Float32 battery_real_voltage;
 bool servo_sw=false;
 double theta1_command, theta2_command;
 bool start_flag=false;
@@ -108,13 +114,17 @@ double Y_ddot_d = 0;
 
 double alpha = 0;
 double beta = 0;
+
+double F_xd = 0;
+double F_yd = 0;
+double F_zd = 0;
 //--------------------------------------------------------
 
 //General dimensions
 
 static double l_arm = 0.109;// m // diagonal length between thruster : 218mm;
-static double l_servo = -0.015;
-static double mass = 1.992;//(Kg)
+static double l_servo = 0.015;
+static double mass = 2.365;//(Kg)
 double initial_z = 0;
 
 
@@ -174,6 +184,15 @@ double Dp=5.0;
 double theta1=0,theta2=0;
 //--------------------------------------------------------
 
+//Voltage=================================================
+double voltage=16.0;
+double voltage_old=16.0;
+//--------------------------------------------------------
+//boolean=================================================
+bool isKill = false;
+bool isArm = false;
+//--------------------------------------------------------
+
 //Function------------------------------------------------
 template <class T>
 T map(T x, T in_min, T in_max, T out_min, T out_max){
@@ -187,7 +206,7 @@ void jointstateCallback(const sensor_msgs::JointState& msg);
 void imu_Callback(const sensor_msgs::Imu& msg);
 sensor_msgs::JointState servo_msg_create(double rr, double rp);
 void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array);
-void loopCallback(const std_msgs::Int16& time);
+void batteryCallback(const std_msgs::Int16& msg);
 void posCallback(const geometry_msgs::Vector3& msg);
 void rotCallback(const geometry_msgs::Quaternion& msg);
 void filterCallback(const sensor_msgs::Imu& msg);
@@ -198,9 +217,12 @@ int32_t pwmMapping(double pwm);
 void pwm_Command(double pwm1, double pwm2, double pwm3, double pwm4, double pwm5, double pwm6, double pwm7, double pwm8);
 void pwm_Kill();
 void pwm_Max();
+void pwm_Arm();
 void pwm_test();
 void pwm_Calibration();
 void kalman_Filtering();
+bool GUI_Arm_Callback(FAC_MAV::ArmService::Request &req, FAC_MAV::ArmService::Response &res);
+bool GUI_Kill_Callback(FAC_MAV::KillService::Request &req, FAC_MAV::KillService::Response &res);
 //-------------------------------------------------------
 
 //Publisher Group--------------------------------------
@@ -220,12 +242,17 @@ ros::Publisher position;
 ros::Publisher kalman_angular_vel;
 ros::Publisher kalman_angular_accel;
 ros::Publisher net_Force;
+ros::Publisher battery_voltage;
+ros::Publisher real_voltage;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
-Eigen::MatrixXd CM(4,8);
-Eigen::Vector4d u;
+//Eigen::MatrixXd CM(4,8);
+Eigen::MatrixXd CM(6,8);
+//Eigen::Vector4d u;
+Eigen::VectorXd u(6);
 Eigen::VectorXd F_cmd(8);
+Eigen::MatrixXd invCM(8,6);
 //-----------------------------------------------------
 
 //Linear_velocity--------------------------------------
@@ -302,7 +329,7 @@ int main(int argc, char **argv){
 		y_c=nh.param<double>("y_center_of_mass",0.0);
 		z_c=nh.param<double>("z_center_of_mass",0.0);
 	//----------------------------------------------------------
-	//
+	
 	//Kalman initialization-------------------------------------
 		x << 0, 0, 0, 0, 0, 0;
 		P << Eigen::MatrixXd::Identity(6,6);
@@ -313,7 +340,9 @@ int main(int argc, char **argv){
 		     Eigen::MatrixXd::Zero(3,3), 100.*Eigen::MatrixXd::Identity(3,3);
 		R << 0.0132*Eigen::MatrixXd::Identity(3,3);
         //----------------------------------------------------------
-	
+	//Set Control Matrix----------------------------------------
+		setCM();
+	//----------------------------------------------------------
     	PWMs = nh.advertise<std_msgs::Int16MultiArray>("PWMs", 1);
 	PWM_generator = nh.advertise<std_msgs::Int32MultiArray>("/command",1);
     	goal_dynamixel_position_  = nh.advertise<sensor_msgs::JointState>("goal_dynamixel_position",100);
@@ -330,15 +359,22 @@ int main(int argc, char **argv){
 	net_Force = nh.advertise<geometry_msgs::Vector3>("F_total",100);
 	kalman_angular_vel = nh.advertise<geometry_msgs::Vector3>("kalman_ang_vel",100);
 	kalman_angular_accel = nh.advertise<geometry_msgs::Vector3>("kalman_ang_accel",100);
+	battery_voltage = nh.advertise<std_msgs::Float32>("battery_voltage",100);
+	real_voltage = nh.advertise<std_msgs::Float32>("real_voltage",100);
 
     	ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     	ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
     	ros::Subscriber rc_in = nh.subscribe("/sbus",100,sbusCallback,ros::TransportHints().tcpNoDelay());
-	//ros::Subscriber loop_timer = nh.subscribe("/loop",100,loopCallback,ros::TransportHints().tcpNoDelay());
+	ros::Subscriber battery_checker = nh.subscribe("/battery",100,batteryCallback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber t265_pos=nh.subscribe("/t265_pos",100,posCallback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber t265_rot=nh.subscribe("/t265_rot",100,rotCallback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber t265_odom=nh.subscribe("/rs_t265/odom/sample",100,t265OdomCallback,ros::TransportHints().tcpNoDelay());
 	
+        //GUI GroundStation----------------------------------------
+	ros::ServiceServer ArmService = nh.advertiseService("/ArmService", GUI_Arm_Callback);
+	ros::ServiceServer KillService = nh.advertiseService("/KillService", GUI_Kill_Callback);
+
+
 	ros::Timer timerPublish = nh.createTimer(ros::Duration(1.0/200.0),std::bind(publisherSet));
     	ros::spin();
     	return 0;
@@ -351,10 +387,8 @@ void publisherSet(){
 	setCM(); // Setting Control Matrix
     	//Publish data
 		
-	if(Sbus[8]>1500){
-		
-	}
-	else{
+	
+	if(Sbus[8]<1500){
 		theta1_command=0.0;
 		theta2_command=0.0;
 	}
@@ -365,10 +399,11 @@ void publisherSet(){
 		Y_d = Y_d_base;
 		e_x_i=0;
 		e_y_i=0;
+		e_z_i=0;
 		
 	}
 
-	if(Sbus[4]<1500){	
+	if(Sbus[4]<1500/*isKill*/){	
 		y_d=cam_att(2);	//[J]This line ensures that yaw desired right after disabling the kill switch becomes current yaw attitude
 		initial_z=pos.z;
 		e_r_i = 0;
@@ -380,6 +415,13 @@ void publisherSet(){
 		pwm_Kill();	
 	}
 	else{
+		/*if(isArm){
+			//pwm_Arm();
+			rpyT_ctrl();
+		}
+		else{
+			pwm_Kill();
+		}*/
 		// ROS_INFO("r:%lf, p:%lf, y:%lf T:%lf", r_d, p_d, y_d, T_d);
 		rpyT_ctrl();	
 	
@@ -395,12 +437,13 @@ void publisherSet(){
 	desired_pos.y = Y_d;
 	desired_pos.z = z_d;
 	altitude_d.data=z_d;
+	battery_voltage_msg.data=voltage;
 	PWMs.publish(PWMs_cmd);
 	euler.publish(imu_rpy);
 	desired_angle.publish(angle_d);
 	Forces.publish(Force);
 	desired_altitude.publish(altitude_d);
-	goal_dynamixel_position_.publish(servo_msg_create(-theta2_command,-theta1_command));
+	goal_dynamixel_position_.publish(servo_msg_create(theta1_command,-theta2_command));
 	desired_torque.publish(desired_value);
 	i_result.publish(integrator);
 	linear_velocity.publish(lin_vel);
@@ -410,16 +453,27 @@ void publisherSet(){
 	net_Force.publish(F_total);
 	kalman_angular_vel.publish(filtered_Angular_vel);
 	kalman_angular_accel.publish(filtered_Angular_accel);
+	battery_voltage.publish(battery_voltage_msg);
+	real_voltage.publish(battery_real_voltage);
 	// ROS_INFO("%d %d %d %d",PWMs_cmd.data[0],PWMs_cmd.data[1],PWMs_cmd.data[2],PWMs_cmd.data[3]);
 	//ROS_INFO("loop time : %f",(((double)ros::Time::now().sec-(double)loop_timer.sec)+((double)ros::Time::now().nsec-(double)loop_timer.nsec)/1000000000.));
 	loop_timer = ros::Time::now();
 }
 
 void setCM(){
-	CM << y_c+(l_servo+z_c)*theta1, l_arm+y_c, y_c+(l_servo+z_c)*theta1, y_c-l_arm, y_c+(l_servo+z_c)*theta1, l_arm+y_c, y_c+(l_servo+z_c)*theta1, y_c-l_arm,
+	//Counter-rotating type
+	/*CM << y_c+(l_servo+z_c)*theta1, l_arm+y_c, y_c+(l_servo+z_c)*theta1, y_c-l_arm, y_c+(l_servo+z_c)*theta1, l_arm+y_c, y_c+(l_servo+z_c)*theta1, y_c-l_arm,
 	      l_arm-x_c, -x_c-(l_servo-z_c)*theta2, -l_arm-x_c, -x_c-(l_servo-z_c)*theta2, l_arm-x_c, -x_c-(l_servo-z_c)*theta2, -l_arm-x_c, -x_c-(l_servo-z_c)*theta2,
 	      -b_over_k_ratio+(l_arm-x_c)*theta1, b_over_k_ratio-(l_arm+y_c)*theta2, -b_over_k_ratio-(l_arm+x_c)*theta1, b_over_k_ratio+(l_arm-y_c)*theta2, b_over_k_ratio+(l_arm-x_c)*theta1, -b_over_k_ratio-(l_arm+y_c)*theta2, b_over_k_ratio-(l_arm+x_c)*theta1, -b_over_k_ratio+(l_arm-y_c)*theta2,
-	      -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0;
+	      -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0;*/
+	//Co-rotating type
+	CM <<           -y_c,    -(y_c+l_arm),           -y_c,    -(y_c-l_arm), -b_over_k_ratio, l_servo+z_c,     0,     0,
+                -(l_arm-x_c),             x_c,      l_arm+x_c,             x_c,  l_servo-z_c, b_over_k_ratio,     0,     0,
+              b_over_k_ratio, -b_over_k_ratio, b_over_k_ratio, -b_over_k_ratio,             y_c,           -x_c, l_arm, l_arm,
+                           0,               0,              0,               0,             1.0,              0,     0,     0,
+                           0,               0,              0,               0,               0,            1.0,     0,     0,
+                         1.0,             1.0,            1.0,             1.0,               0,              0,     0,     0;
+	invCM = CM.completeOrthogonalDecomposition().pseudoInverse();
 }
 
 void rpyT_ctrl() {
@@ -467,10 +521,9 @@ void rpyT_ctrl() {
 		if(Sbus[8]>1500){
 			r_d = 0.0;
 			p_d = 0.0;
-			theta1_command = mass*Y_ddot_d/(F(0)+F(2)); //theta1 = F_y/(F1+F3)
-			theta2_command = -mass*X_ddot_d/(F(1)+F(3)); //theta2 = -F_x/(F2+F4)
-			if(fabs(theta1_command)>servo_limit) theta1_command = (theta1_command/fabs(theta1_command))*servo_limit;
-			if(fabs(theta2_command)>servo_limit) theta2_command = (theta2_command/fabs(theta2_command))*servo_limit;
+			F_xd = mass*X_ddot_d;
+			F_yd = mass*Y_ddot_d;
+
 		}
 		else{
 			r_d = asin(alpha);
@@ -507,30 +560,34 @@ void rpyT_ctrl() {
 	if(Sbus[5]>1500){
 		Thrust_d =-(Pz * e_z + Iz * e_z_i - Dz * (-v(2)) + mass*g);
 		// ROS_INFO("Altitude Control!!");
+		F_zd = Thrust_d;
+		if(F_zd>-0.5*mass*g) F_zd = -0.5*mass*g;
+		if(F_zd<-1.5*mass*g) F_zd = -1.5*mass*g;
 	}
 	else{
+		e_z_i = 0;
 		Thrust_d=T_d;
+		if(Thrust_d>-0.5*mass*g) Thrust_d = -0.5*mass*g;
+		if(Thrust_d<-1.5*mass*g) Thrust_d = -1.5*mass*g;
 		// ROS_INFO("Manual Thrust!!");
 	}
 
 	double tau_y_d = Py * e_y + Dy * (-imu_ang_vel.z);
 
-	u << tau_r_d, tau_p_d, tau_y_d, Thrust_d;
+	//u << tau_r_d, tau_p_d, tau_y_d, Thrust_d;
+	u << tau_r_d, tau_p_d, tau_y_d, F_xd, F_yd, F_zd;
 
 	//ROS_INFO("xvel:%lf, yvel:%lf, zvel:%lf", imu_ang_vel.x, imu_ang_vel.y, imu_ang_vel.z);
 	// ROS_INFO("tr:%lf, tp:%lf, ty:%lf, Thrust_d:%lf", tau_r_d, tau_p_d, tau_y_d, Thrust_d);
 	// ROS_INFO("%f",Dz*freq*delta_z);
 	ud_to_PWMs(tau_r_d, tau_p_d, tau_y_d, Thrust_d);
-	desired_value.x=tau_r_d;
-	desired_value.y=tau_p_d;
-	desired_value.z=tau_y_d;
-	desired_value.w=Thrust_d;
+	//ROS_INFO("F_zd : %lf",F_zd);
 }
 
  
 
 void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thrust_des) {
-	
+	/*Counter-rotating type
 	//Conventional type
 	F1 = +((double)0.25 / l_arm) * tau_p_des - ((double)0.125 / b_over_k_ratio) * tau_y_des - (double)0.125 * Thrust_des;
 	F2 = +((double)0.25 / l_arm) * tau_r_des + ((double)0.125 / b_over_k_ratio) * tau_y_des - (double)0.125 * Thrust_des;
@@ -541,35 +598,40 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 	F7 = -((double)0.25 / l_arm) * tau_p_des + ((double)0.125 / b_over_k_ratio) * tau_y_des - (double)0.125 * Thrust_des;
 	F8 = -((double)0.25 / l_arm) * tau_r_des - ((double)0.125 / b_over_k_ratio) * tau_y_des - (double)0.125 * Thrust_des;
  	
+	//pwm_Command(Force_to_PWM(F1),Force_to_PWM(F2), Force_to_PWM(F3), Force_to_PWM(F4), Force_to_PWM(F5), Force_to_PWM(F6), Force_to_PWM(F7), Force_to_PWM(F8));
+
+
 	//Tilting type
     	F_cmd=CM.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(u);
 
-	//ROS_INFO("F1:%lf, F2:%lf, F3:%lf, F4:%lf", F(0), F(1), F(2), F(3));
-	// PWMs_cmd.data.resize(4);
-	// PWMs_cmd.data[0] = 1000;
-	// PWMs_cmd.data[1] = 1000;
-	// PWMs_cmd.data[2] = 1000;
-	// PWMs_cmd.data[3] = 1000;
-	
-	//PWMs_cmd.data[0] = Force_to_PWM(F1);
-	//PWMs_cmd.data[1] = Force_to_PWM(F2);
-	//PWMs_cmd.data[2] = Force_to_PWM(F3);
-	//PWMs_cmd.data[3] = Force_to_PWM(F4);
-	
-	//Conventional type
-	//pwm_Command(Force_to_PWM(F1),Force_to_PWM(F2), Force_to_PWM(F3), Force_to_PWM(F4), Force_to_PWM(F5), Force_to_PWM(F6), Force_to_PWM(F7), Force_to_PWM(F8));
-
-	//Tilting type
 	pwm_Command(Force_to_PWM(F_cmd(0)), Force_to_PWM(F_cmd(1)), Force_to_PWM(F_cmd(2)), Force_to_PWM(F_cmd(3)), Force_to_PWM(F_cmd(4)), Force_to_PWM(F_cmd(5)), Force_to_PWM(F_cmd(6)), Force_to_PWM(F_cmd(7)));
 
-	Force.x=PWMs_val.data[0];
-	Force.y=PWMs_val.data[1];
-	Force.z=PWMs_val.data[2];
-	Force.w=PWMs_val.data[3];
-        
-	F_total.x=-theta2*(F_cmd(1)+F_cmd(3));
-	F_total.y=theta1*(F_cmd(0)+F_cmd(2));
-	F_total.z=-F_cmd(0)-F_cmd(1)-F_cmd(2)-F_cmd(3);
+	}*/
+	
+	//Co-rotating type
+	//Conventional type
+	if(Sbus[8]<1500){
+		F1 = +((double)0.5 / l_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
+		F2 = +((double)0.5 / l_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
+		F3 = -((double)0.5 / l_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
+		F4 = -((double)0.5 / l_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
+		//ROS_INFO("%lf %lf %lf %lf",F1,F2,F3,F4);
+	}
+	//Tilting type
+	else {
+	    	F_cmd=invCM*u;
+		// F_cmd = [F_(1,z) F_(2,z) F_(3,z) F_(4,z) F_x F_y F_xg F_yg]
+		//ROS_INFO("%lf",-F_cmd(5));
+		theta1_command = atan2(F_cmd(5),-(F_cmd(0)+F_cmd(2)));
+		theta2_command = atan2(-F_cmd(4),-(F_cmd(1)+F_cmd(3)));
+ 		if(fabs(theta1_command)>servo_limit) theta1_command = (theta1_command/fabs(theta1_command))*servo_limit;
+		if(fabs(theta2_command)>servo_limit) theta2_command = (theta2_command/fabs(theta2_command))*servo_limit;
+		F1 = sqrt(pow((F_cmd(5)+F_cmd(7))/2.0,2)+pow(F_cmd(0),2));
+		F2 = sqrt(pow((F_cmd(4)+F_cmd(6))/2.0,2)+pow(F_cmd(1),2));
+		F3 = sqrt(pow((F_cmd(5)+F_cmd(7))/2.0,2)+pow(F_cmd(2),2));
+		F4 = sqrt(pow((F_cmd(4)+F_cmd(6))/2.0,2)+pow(F_cmd(3),2));
+	}
+	pwm_Command(Force_to_PWM(F1),Force_to_PWM(F2), Force_to_PWM(F3), Force_to_PWM(F4), Force_to_PWM(F1), Force_to_PWM(F2), Force_to_PWM(F3), Force_to_PWM(F4));
 	// ROS_INFO("1:%d, 2:%d, 3:%d, 4:%d",PWMs_cmd.data[0], PWMs_cmd.data[1], PWMs_cmd.data[2], PWMs_cmd.data[3]);
 	// ROS_INFO("%f 1:%d, 2:%d, 3:%d, 4:%d",z_d,PWMs_cmd.data[0], PWMs_cmd.data[1], PWMs_cmd.data[2], PWMs_cmd.data[3]);
 }
@@ -578,11 +640,11 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 
 double Force_to_PWM(double F) {
 	double pwm;
-	double param1 = 1111.07275742670;
-	double param2 = 44543.2632092715;
-	double param3 = 6112.46876873481;
-	//Force=0.0000224500839846839*PWM^2-0.049887353434648*PWM+27.577014233466
-	//PWM=1111.07275742670+(44543.2632092715*Force+6112.46876873481)^0.5
+	double param1 = 610;
+	double param2 = 100000;
+	double param3 = 230730;
+	//Force=1E-05*PWM^2-0.0096*PWM-0.5279
+	//PWM=610+(100000*Force+230730)^0.5
 	if(param2*F+param3>0){
 		pwm = param1 + sqrt(param2 * F + param3);
 	}
@@ -645,7 +707,7 @@ sensor_msgs::JointState servo_msg_create(double rr, double rp){
 	servo_msg.position.resize(2);
 	servo_msg.position[0]=rr;
 	servo_msg.position[1]=rp;
-
+	//ROS_INFO("rr: %lf, rp: %lf",rr,rp);
 	return servo_msg;
 }
 
@@ -661,8 +723,15 @@ void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array){
 }
 
 
-void loopCallback(const std_msgs::Int16& time){
-	loop_time=time.data;
+void batteryCallback(const std_msgs::Int16& msg){
+	int16_t value=msg.data;
+	voltage=value*3.3/(double)4096/(7440./(30000.+7440.));
+	battery_real_voltage.data = voltage;
+	double kv=0.08;
+	voltage=kv*voltage+(1-kv)*voltage_old;
+	voltage_old=voltage;
+	if(voltage>16.8) voltage=16.8;
+	if(voltage<14.0) voltage=14.0;
 }
 
 ros::Time posTimer;
@@ -718,6 +787,26 @@ void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg){
 	//ROS_INFO("Attitude - [r: %f  p: %f  y:%f]",cam_att(0),cam_att(1),cam_att(2));
 	//ROS_INFO("Linear_velocity - [x: %f  y: %f  z:%f]",v(0),v(1),v(2));
 	//ROS_INFO("Angular_velocity - [x: %f  y: %f  z:%f]",w(0),w(1),w(2));
+}
+
+bool GUI_Arm_Callback(FAC_MAV::ArmService::Request &req, FAC_MAV::ArmService::Response &res){
+	if(req.Arm_isChecked){
+		isArm = true;
+	}
+	else{
+		isArm = false;
+	}
+	return true;
+}
+
+bool GUI_Kill_Callback(FAC_MAV::KillService::Request &req, FAC_MAV::KillService::Response &res){
+	if(req.Kill_isChecked){
+		isKill = true;
+	}
+	else{
+		isKill = false;
+	}
+	return true;
 }
 
 int32_t pwmMapping(double pwm){
@@ -804,7 +893,16 @@ void pwm_Kill(){
 
 }
 
-void pwm_test(){
+void pwm_Arm(){
+	PWMs_cmd.data.resize(8);
+	PWMs_cmd.data[0] = 1200;
+	PWMs_cmd.data[1] = 1200;
+	PWMs_cmd.data[2] = 1200;
+	PWMs_cmd.data[3] = 1200;
+	PWMs_cmd.data[4] = 1200;
+	PWMs_cmd.data[5] = 1200;
+	PWMs_cmd.data[6] = 1200;
+	PWMs_cmd.data[7] = 1200;
 	PWMs_val.data.resize(16);
 	PWMs_val.data[0] = pwmMapping(1200.);
 	PWMs_val.data[1] = pwmMapping(1200.);
@@ -825,7 +923,7 @@ void pwm_test(){
 
 }
 void pwm_Calibration(){
-	if(Sbus[4]>1500) pwm_test();
+	if(Sbus[4]>1500) pwm_Arm();
 	else pwm_Kill();
 }
 

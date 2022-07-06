@@ -1,5 +1,5 @@
 <launch>
-    <?ignore
+
     <include file="$(find setting_tf2)/launch/tf2_setting.launch">
     </include>
 
@@ -13,7 +13,7 @@
 	<arg name="position_i_gain"		default="300"/>
 	<arg name="position_d_gain"		default="100"/>
     </include>
-    ?>
+
     <!-- ros_mscl -->
     <include file="$(find microstrain_inertial_driver)/launch/microstrain.launch">
           <arg name="name"                   default = "gx5" />
@@ -33,10 +33,10 @@
 	  <arg name="use_enu_frame"          default = "false" />
     </include>
 
-    <?ignore <!-- t265 -->
+    <!-- t265 -->
     <include file="$(find realsense2_camera)/launch/rs_t265.launch">
     </include>
-    ?>
+    
     <!-- rosserial_arduino -->
     <node pkg="rosserial_arduino" type="serial_node.py" name="ros_arduino_PWMs" >
 	<param name="port" value="/dev/arduino-dueP"/>
@@ -52,9 +52,9 @@
 	<param name="position_integ_limit"	value="10.0"/>
 
     	<!--attitude_rp gains-->
-    	<param name="attitude_rp_P_gain"	value="4.5"/>
+    	<param name="attitude_rp_P_gain"	value="2.8"/>
     	<param name="attitude_rp_I_gain"	value="0.5"/>
-    	<param name="attitude_rp_D_gain"	value="0.7"/>
+    	<param name="attitude_rp_D_gain"	value="0.45"/>
 
 	<!--attitude_y gain-->
 	<param name="attitude_y_P_gain"		value="2.0"/>
@@ -62,19 +62,19 @@
 	<param name="attitude_y_D_gain"		value="0.2"/>
 
 	<!--Altitude gains-->
-	<param name="altitude_P_gain"		value="20.0"/>
+	<param name="altitude_P_gain"		value="15.0"/>
 	<param name="altitude_I_gain"		value="5.0"/>
-	<param name="altitude_D_gain"		value="15.0"/>
+	<param name="altitude_D_gain"		value="10.0"/>
 
 	<!--Position gains-->
-	<param name="position_P_gain"		value="5.0"/>	
+	<param name="position_P_gain"		value="3.0"/>	
 	<param name="position_I_gain"		value="0.1"/>	
-	<param name="position_D_gain"		value="5.0"/>	
+	<param name="position_D_gain"		value="3.0"/>	
 
 	<!--Center of mass-->
-	<param name="x_center_of_mass"		value="0.0"/>	
-	<param name="y_center_of_mass"		value="0.0"/>	
-	<param name="z_center_of_mass"		value="-0.03"/>	
+	<param name="x_center_of_mass"		value="-0.002"/>	
+	<param name="y_center_of_mass"		value="0.011"/>	
+	<param name="z_center_of_mass"		value="-0.044"/>	
 
 
     <node name="FAC_MAV_node"  pkg="FAC_MAV" type="FAC_MAV_ctrler"  output="screen"/>
