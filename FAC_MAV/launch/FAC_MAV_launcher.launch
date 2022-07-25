@@ -9,9 +9,9 @@
         <arg name="baud_rate"   		default="4500000"/>
 	<arg name="profile_velocity"		default="0"/>
 	<arg name="profile_acceleration"	default="0"/>
-	<arg name="position_p_gain"		default="1500"/>
-	<arg name="position_i_gain"		default="300"/>
-	<arg name="position_d_gain"		default="100"/>
+	<arg name="position_p_gain"		default="1700"/>
+	<arg name="position_i_gain"		default="500"/>
+	<arg name="position_d_gain"		default="300"/>
     </include>
 
     <!-- ros_mscl -->
@@ -51,31 +51,52 @@
 	<param name="altitude_integ_limit"	value="100.0"/>
 	<param name="position_integ_limit"	value="10.0"/>
 
-    	<!--attitude_rp gains-->
-    	<param name="attitude_rp_P_gain"	value="2.8"/>
-    	<param name="attitude_rp_I_gain"	value="0.5"/>
-    	<param name="attitude_rp_D_gain"	value="0.45"/>
-
-	<!--attitude_y gain-->
-	<param name="attitude_y_P_gain"		value="2.0"/>
-	<!--<param name="attitude_y_I_gain"		value="0"/>-->
-	<param name="attitude_y_D_gain"		value="0.2"/>
-
-	<!--Altitude gains-->
-	<param name="altitude_P_gain"		value="15.0"/>
-	<param name="altitude_I_gain"		value="5.0"/>
-	<param name="altitude_D_gain"		value="10.0"/>
-
-	<!--Position gains-->
-	<param name="position_P_gain"		value="3.0"/>	
-	<param name="position_I_gain"		value="0.1"/>	
-	<param name="position_D_gain"		value="3.0"/>	
-
 	<!--Center of mass-->
 	<param name="x_center_of_mass"		value="-0.002"/>	
 	<param name="y_center_of_mass"		value="0.011"/>	
 	<param name="z_center_of_mass"		value="-0.044"/>	
 
+	<!--Conventional flight mode-->
+    		<!--Conventional Mode attitude_rp gains-->
+    		<param name="conv_attitude_rp_P_gain"	value="2.8"/>
+    		<param name="conv_attitude_rp_I_gain"	value="0.5"/>
+    		<param name="conv_attitude_rp_D_gain"	value="0.45"/>
+
+		<!--Conventional Mode attitude_y gain-->
+		<param name="conv_attitude_y_P_gain"	value="3.8"/>
+		<!--<param name="conv_attitude_y_I_gain"	value="0"/>-->
+		<param name="conv_attitude_y_D_gain"	value="0.2"/>
+
+		<!--Conventional Mode Altitude gains-->
+		<param name="conv_altitude_P_gain"	value="15.0"/>
+		<param name="conv_altitude_I_gain"	value="5.0"/>
+		<param name="conv_altitude_D_gain"	value="10.0"/>
+
+		<!--Conventional Mode Position gains-->
+		<param name="conv_position_P_gain"	value="3.0"/>	
+		<param name="conv_position_I_gain"	value="0.1"/>	
+		<param name="conv_position_D_gain"	value="3.0"/>
+	
+	<!--Tilt flight mode-->
+		<!--Tilt Mode attitude_rp gains-->
+		<param name="tilt_attitude_rp_P_gain"	value="2.8"/>	
+		<param name="tilt_attitude_rp_I_gain"	value="0.5"/>
+		<param name="tilt_attitude_rp_D_gain"	value="0.45"/>
+
+		<!--Tilt Mode attitude_y gains-->
+		<param name="tilt_attitude_y_P_gain"	value="0.5"/>
+		<!--<param name="tilt_attitude_y_I_gain"	value="0"/>-->
+		<param name="tilt_attitude_y_D_gain"	value="0.2"/>
+
+		<!--Tilt Mode Altitude gains-->
+		<param name="tilt_altitude_P_gain"	value="15.0"/>
+		<param name="tilt_altitude_I_gain"	value="5.0"/>
+		<param name="tilt_altitude_D_gain"	value="10.0"/>
+
+		<!--Tilt Mode Position gains-->
+		<param name="tilt_position_P_gain"	value="3.0"/>	
+		<param name="tilt_position_I_gain"	value="0.1"/>	
+		<param name="tilt_position_D_gain"	value="3.0"/>	
 
     <node name="FAC_MAV_node"  pkg="FAC_MAV" type="FAC_MAV_ctrler"  output="screen"/>
 
