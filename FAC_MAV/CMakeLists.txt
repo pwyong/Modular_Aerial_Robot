@@ -65,8 +65,12 @@ include_directories(${Eigen_INCLUDE_DIRS})
 add_service_files(
   FILES
   ArmService.srv
-  KillService.srv
+  KillService.srv  
+  PosCtrlService.srv
+  HoverService.srv
+  FAC_HoverService.srv
 )
+
 
 ## Generate actions in the 'action' folder
 # add_action_files(
@@ -145,6 +149,7 @@ include_directories(
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 add_executable(FAC_MAV_ctrler src/FAC_MAV_ctrler.cpp)
+add_executable(FAC_MAV_GUI_ctrler src/FAC_MAV_GUI_ctrler.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -155,20 +160,17 @@ add_executable(FAC_MAV_ctrler src/FAC_MAV_ctrler.cpp)
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 add_dependencies(FAC_MAV_ctrler ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
+add_dependencies(FAC_MAV_GUI_ctrler ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 ## Specify libraries to link a library or executable target against
 target_link_libraries(FAC_MAV_ctrler
   ${catkin_LIBRARIES}
   ${Eigen_LIBRARIES}
 )
+target_link_libraries(FAC_MAV_GUI_ctrler
+  ${catkin_LIBRARIES}
+  ${Eigen_LIBRARIES}
+)
 
-add_executable(ArmClient src/ArmClient.cpp)
-add_dependencies(ArmClient ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(ArmClient ${catkin_LIBRARIES})
-
-add_executable(KillClient src/KillClient.cpp)
-add_dependencies(KillClient ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(KillClient ${catkin_LIBRARIES})
 
 #############
 ## Install ##

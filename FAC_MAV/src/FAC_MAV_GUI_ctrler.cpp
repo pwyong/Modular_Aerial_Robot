@@ -1,6 +1,7 @@
 //2022.05.16 Coaxial-Octorotor version
 //2022.06.23 Ground Station Application
 
+// 8: 중앙서보, 6 : 포지션제어, 4: 킬, 5 : 고도제어
 #include <ros/ros.h>
 #include <iostream>
 #include <eigen3/Eigen/Core>
@@ -137,8 +138,8 @@ int yaw_rotate_count = 0;
 //General dimensions
 
 static double l_arm = 0.109;// m // diagonal length between thruster : 218mm;
-static double l_servo = 0.015;
-static double mass = 2.365;//(Kg)
+static double l_servo = -0.015;
+static double mass = 1.992;//(Kg)
 double initial_z = 0;
 
 
@@ -190,7 +191,7 @@ double Pz=16.0;
 double Iz=5.0;
 double Dz=15.0;
 
-//Position PID gains
+//
 double Pp=3.0;
 double Ip=0.1;
 double Dp=5.0;
@@ -216,9 +217,15 @@ double theta1=0,theta2=0;
 double voltage=16.0;
 double voltage_old=16.0;
 //--------------------------------------------------------
+
 //boolean=================================================
-bool isKill = false;
-bool isArm = false;
+bool isKill = false; //ASDF
+bool isArm = false;  //ASDF
+bool isHover = false; //ASDF
+bool isHovering = false; //ASDF
+bool isLanding = false; //ASDF
+int Hover_Checker = 0; //ASDF
+int Land_Checker = 0; //ASDF
 //--------------------------------------------------------
 
 //Function------------------------------------------------
@@ -245,12 +252,14 @@ int32_t pwmMapping(double pwm);
 void pwm_Command(double pwm1, double pwm2, double pwm3, double pwm4, double pwm5, double pwm6, double pwm7, double pwm8);
 void pwm_Kill();
 void pwm_Max();
-void pwm_Arm();
+void pwm_Arm(); //ASDF
 void pwm_test();
 void pwm_Calibration();
 void kalman_Filtering();
-bool GUI_Arm_Callback(FAC_MAV::ArmService::Request &req, FAC_MAV::ArmService::Response &res);
-bool GUI_Kill_Callback(FAC_MAV::KillService::Request &req, FAC_MAV::KillService::Response &res);
+bool GUI_Arm_Callback(FAC_MAV::ArmService::Request &req, FAC_MAV::ArmService::Response &res); // for Arm ASDF 
+bool GUI_Kill_Callback(FAC_MAV::KillService::Request &req, FAC_MAV::KillService::Response &res); // for Kill
+bool GUI_PosCtrlService_Callback(FAC_MAV::PosCtrlService::Request &req, FAC_MAV::PosCtrlService::Response &res); // ASDF for Hover, Land, Positon_ctrl
+bool GUI_Hover_Callback(FAC_MAV::HoverService::Request &req, FAC_MAV::HoverService::Response &res);  //ASDF
 void pid_Gain_Setting();
 //-------------------------------------------------------
 
@@ -274,6 +283,7 @@ ros::Publisher desired_force;
 ros::Publisher battery_voltage;
 ros::Publisher real_voltage;
 ros::Publisher force_command;
+ros::ServiceClient HoverClient; //ASDF
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
@@ -300,6 +310,8 @@ Eigen::Vector3d cam_att;
 Eigen::Matrix3d R_a;
 Eigen::Vector3d t4_att;
 //-----------------------------------------------------
+//GUIClient
+FAC_MAV::FAC_HoverService Service;  //ASDF
 
 //Kalman_Filter----------------------------------------
 Eigen::MatrixXd F(6,6);
@@ -321,7 +333,7 @@ double iterator = 0;
 
 int main(int argc, char **argv){
 	
-    	ros::init(argc, argv,"t3_mav_controller");
+    	ros::init(argc, argv,"FAC_MAV_controller");
 
     	std::string deviceName;
     	ros::NodeHandle params("~");
@@ -379,9 +391,12 @@ int main(int argc, char **argv){
 			tilt_Pp=nh.param<double>("tilt_position_P_gain",3.0);
 			tilt_Ip=nh.param<double>("tilt_position_I_gain",0.1);
 			tilt_Dp=nh.param<double>("tilt_position_D_gain",3.0);
-
 	//----------------------------------------------------------
 	
+	//Set Control Matrix----------------------------------------
+		setCM();
+	//----------------------------------------------------------
+
 	//Kalman initialization-------------------------------------
 		x << 0, 0, 0, 0, 0, 0;
 		P << Eigen::MatrixXd::Identity(6,6);
@@ -392,9 +407,7 @@ int main(int argc, char **argv){
 		     Eigen::MatrixXd::Zero(3,3), 100.*Eigen::MatrixXd::Identity(3,3);
 		R << 0.0132*Eigen::MatrixXd::Identity(3,3);
         //----------------------------------------------------------
-	//Set Control Matrix----------------------------------------
-		setCM();
-	//----------------------------------------------------------
+	
     	PWMs = nh.advertise<std_msgs::Int16MultiArray>("PWMs", 1);
 	PWM_generator = nh.advertise<std_msgs::Int32MultiArray>("/command",1);
     	goal_dynamixel_position_  = nh.advertise<sensor_msgs::JointState>("goal_dynamixel_position",100);
@@ -415,6 +428,7 @@ int main(int argc, char **argv){
 	real_voltage = nh.advertise<std_msgs::Float32>("real_voltage",100);
 	force_command = nh.advertise<std_msgs::Float32MultiArray>("force_cmd",100);
 
+
     	ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     	ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
     	ros::Subscriber rc_in = nh.subscribe("/sbus",100,sbusCallback,ros::TransportHints().tcpNoDelay());
@@ -424,9 +438,11 @@ int main(int argc, char **argv){
 	ros::Subscriber t265_odom=nh.subscribe("/rs_t265/odom/sample",100,t265OdomCallback,ros::TransportHints().tcpNoDelay());
 	
         //GUI GroundStation----------------------------------------
-	ros::ServiceServer ArmService = nh.advertiseService("/ArmService", GUI_Arm_Callback);
-	ros::ServiceServer KillService = nh.advertiseService("/KillService", GUI_Kill_Callback);
-
+	ros::ServiceServer ArmService = nh.advertiseService("/ArmService", GUI_Arm_Callback); //ASDF
+	ros::ServiceServer KillService = nh.advertiseService("/KillService", GUI_Kill_Callback); //ASDF
+	ros::ServiceServer PosCtrlService = nh.advertiseService("/PosCtrlService", GUI_PosCtrlService_Callback); //ASDF
+	ros::ServiceServer HoverService = nh.advertiseService("/HoverService", GUI_Hover_Callback); //ASDF
+    	HoverClient = nh.serviceClient<FAC_MAV::FAC_HoverService>("/FAC_HoverService"); //ASDF
 
 	ros::Timer timerPublish = nh.createTimer(ros::Duration(1.0/200.0),std::bind(publisherSet));
     	ros::spin();
@@ -436,24 +452,15 @@ int main(int argc, char **argv){
 ros::Time loop_timer;
 
 void publisherSet(){
-
+    	//Publish data
+		
 	
 	if(Sbus[8]<1500){
 		theta1_command=0.0;
 		theta2_command=0.0;
 	}
-	if(Sbus[6]<=1500){
-		X_d_base=pos.x;
-		Y_d_base=pos.y;
-		X_d = X_d_base;
-		Y_d = Y_d_base;
-		e_x_i=0;
-		e_y_i=0;
-		e_z_i=0;
-		
-	}
 
-	if(Sbus[4]<1500/*isKill*/){	
+	if(isKill || Sbus[4]<1500){	
 		y_d=cam_att(2);	//[J]This line ensures that yaw desired right after disabling the kill switch becomes current yaw attitude
 		initial_z=pos.z;
 		e_r_i = 0;
@@ -465,16 +472,15 @@ void publisherSet(){
 		pwm_Kill();	
 	}
 	else{
-		/*if(isArm){
-			//pwm_Arm();
-			rpyT_ctrl();
+		if(isArm){ //AAAA
+			if(isHover) rpyT_ctrl();
+			else pwm_Arm();
 		}
 		else{
 			pwm_Kill();
-		}*/
+		}
 		// ROS_INFO("r:%lf, p:%lf, y:%lf T:%lf", r_d, p_d, y_d, T_d);
-		rpyT_ctrl();	
-		//pwm_Arm();
+		//rpyT_ctrl();	
 	
 	}
 	
@@ -533,17 +539,65 @@ void setCM(){
 	//invCM = CM.completeOrthogonalDecomposition().pseudoInverse();
 	F_cmd << 0, 0, 0, 0, 0, 0;
 }
-
 void rpyT_ctrl() {
 	
-	pid_Gain_Setting();
-	//ROS_INFO("%.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf ",Pa, Ia, Da, Py, Dy, Pz, Iz, Dz, Pp, Ip, Dp);
+/*AAAA ASDF
 	y_d_tangent=y_vel_limit*(((double)Sbus[0]-(double)1500)/(double)500);
 	if(fabs(y_d_tangent)<y_d_tangent_deadzone || fabs(y_d_tangent)>y_vel_limit) y_d_tangent=0;
 	y_d+=y_d_tangent;
 	
 	z_d=altitude_limit*(((double)Sbus[2]-(double)1500)/(double)500)+altitude_limit;
 	T_d =-T_limit*(((double)Sbus[2]-(double)1500)/(double)500)-T_limit;
+*/
+	if(isLanding) //ASDF
+	{
+		if(z_d>-0.1) z_d -=0.002; //10초동안 Landing 함. 최종 desired alti = 10cm 정도
+		else
+		{
+			if(pos.z<0.15)  //대충 15cm 정도
+			{
+				Land_Checker ++;
+
+					if(Land_Checker>=200) //3초간 유지
+					{
+						isLanding = false;   //고도가 15cm 이하로 떨어지면 Arm 모드로 전환
+						isHover = false;    //
+						Service.request.FAC_isLanding = false;
+						Service.request.FAC_isHover = false;    //GUI에게 Landing이 끝났다고 알려주기.
+						Service.request.FAC_isHovering = false;
+						HoverClient.call(Service);
+					}
+			}
+			else Land_Checker = 0;		
+		}
+	}
+
+	if(isHovering) //ASDF
+	{
+		if(z_d<=1) z_d +=0.002; //5초동안 1m 올라감.
+		else
+		{
+			if(pos.z>0.9 && pos.z<1.1)  //1미터 +- 10cm 범위내에 도달하면
+			{
+			Hover_Checker ++;
+
+				if(Hover_Checker >= 600)    //3초동안 
+				{
+					isHovering = false;     //Hovering 끝, Hovered 상태.
+					Service.request.FAC_isHovering = false;
+					Service.request.FAC_isHover = true;   //GUI에게 Hovering이 끝났다고 알려주기.
+					Service.request.FAC_isLanding = false;
+					HoverClient.call(Service);
+				}
+			}
+			else Hover_Checker = 0;
+		
+		}
+	}
+//poz.z가 1보다 큰거 말고 z_d가 1 일 때 pos.z가 얼마인지 판단해서 호버링 완료인지 아닌지로 판단
+//몆 루프동안 poz.z가 z_d 범위 안에 도달하면 hovering 성공이다 이렇게 쓰자.
+
+
 
 	double e_r = 0;
 	double e_p = 0;
@@ -556,44 +610,33 @@ void rpyT_ctrl() {
 	theta1_command = 0.0;
 	theta2_command = 0.0;	
 
-	if(Sbus[6]>1500){
-		X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
-		Y_d = Y_d_base + XY_limit*(((double)Sbus[3]-(double)1500)/(double)500);
-		
-		e_X = X_d - pos.x;
-		e_Y = Y_d - pos.y;
-		e_x_i += e_X * ((double)1 / freq);
-		if (fabs(e_x_i) > pos_integ_limit) e_x_i = (e_x_i / fabs(e_x_i)) * pos_integ_limit;
-		e_y_i += e_Y * ((double)1 / freq);
-		if (fabs(e_y_i) > pos_integ_limit) e_y_i = (e_y_i / fabs(e_y_i)) * pos_integ_limit;
-	
-		X_ddot_d = Pp * e_X + Ip * e_x_i - Dp * v(0);
-		Y_ddot_d = Pp * e_Y + Ip * e_y_i - Dp * v(1);	
-		if(fabs(X_ddot_d) > XY_ddot_limit) X_ddot_d = (X_ddot_d/fabs(X_ddot_d))*XY_ddot_limit;
-		if(fabs(Y_ddot_d) > XY_ddot_limit) Y_ddot_d = (Y_ddot_d/fabs(Y_ddot_d))*XY_ddot_limit;
+	e_X = X_d - pos.x;
+	e_Y = Y_d - pos.y;
+	e_x_i += e_X * ((double)1 / freq);
+	if (fabs(e_x_i) > pos_integ_limit) e_x_i = (e_x_i / fabs(e_x_i)) * pos_integ_limit;
+	e_y_i += e_Y * ((double)1 / freq);
+	if (fabs(e_y_i) > pos_integ_limit) e_y_i = (e_y_i / fabs(e_y_i)) * pos_integ_limit;
 
-		alpha=(-sin(cam_att(2))*X_ddot_d+cos(cam_att(2))*Y_ddot_d)/g;
-		beta=(-cos(cam_att(2))*X_ddot_d-sin(cam_att(2))*Y_ddot_d)/g;
-		if(fabs(alpha) > alpha_beta_limit) alpha = (alpha/fabs(alpha))*alpha_beta_limit;
-		if(fabs(beta) > alpha_beta_limit) beta = (beta/fabs(beta))*alpha_beta_limit;
-		
-		
-		if(Sbus[8]>1500){
-			r_d = 0.0;
-			p_d = 0.0;
-		}
-		else{
-			r_d = asin(alpha);
-			p_d = asin(beta/cos(imu_rpy.x));
-			if(fabs(r_d)>rp_limit) r_d = (r_d/fabs(r_d))*rp_limit;
-			if(fabs(p_d)>rp_limit) p_d = (p_d/fabs(p_d))*rp_limit;
-			//ROS_INFO("Position Control!!");
-		}
+	X_ddot_d = Pp * e_X + Ip * e_x_i - Dp * v(0);
+	Y_ddot_d = Pp * e_Y + Ip * e_y_i - Dp * v(1);	
+	if(fabs(X_ddot_d) > XY_ddot_limit) X_ddot_d = (X_ddot_d/fabs(X_ddot_d))*XY_ddot_limit;
+	if(fabs(Y_ddot_d) > XY_ddot_limit) Y_ddot_d = (Y_ddot_d/fabs(Y_ddot_d))*XY_ddot_limit;
+
+	alpha=(-sin(cam_att(2))*X_ddot_d+cos(cam_att(2))*Y_ddot_d)/g;
+	beta=(-cos(cam_att(2))*X_ddot_d-sin(cam_att(2))*Y_ddot_d)/g;
+	if(fabs(alpha) > alpha_beta_limit) alpha = (alpha/fabs(alpha))*alpha_beta_limit;
+	if(fabs(beta) > alpha_beta_limit) beta = (beta/fabs(beta))*alpha_beta_limit;
+
+	if(Sbus[8]>1500){ //ASDF
+		r_d = 0.0;
+		p_d = 0.0;
 	}
 	else{
-		r_d=rp_limit*(((double)Sbus[3]-(double)1500)/(double)500);
-		p_d=rp_limit*(((double)Sbus[1]-(double)1500)/(double)500);
-		//ROS_INFO("Attidue Control!!");
+		r_d = asin(alpha);
+		p_d = asin(beta/cos(imu_rpy.x));
+		if(fabs(r_d)>rp_limit) r_d = (r_d/fabs(r_d))*rp_limit;
+		if(fabs(p_d)>rp_limit) p_d = (p_d/fabs(p_d))*rp_limit;
+		//ROS_INFO("Position Control!!");
 	}
 	
 	e_r = r_d - imu_rpy.x;
@@ -614,16 +657,14 @@ void rpyT_ctrl() {
 	tau_r_d = Pa * e_r + Ia * e_r_i + Da * (-imu_ang_vel.x);//- (double)0.48;
 	tau_p_d = Pa * e_p + Ia * e_p_i + Da * (-imu_ang_vel.y);//+ (double)0.18; 
 
-	if(Sbus[5]>1500){
+	if(true){ //AAAA Sbus[5]>1500 ASDF
 		Thrust_d =-(Pz * e_z + Iz * e_z_i - Dz * (-v(2)) + mass*g);
 		// ROS_INFO("Altitude Control!!");
 	}
 	else{
-		e_z_i = 0;
 		Thrust_d=T_d;
 		// ROS_INFO("Manual Thrust!!");
 	}
-
 	if(Thrust_d > -0.5*mass*g) Thrust_d = -0.5*mass*g;
 	if(Thrust_d < -1.5*mass*g) Thrust_d = -1.5*mass*g;
 
@@ -636,11 +677,9 @@ void rpyT_ctrl() {
 	if(fabs(F_xd) > fabs(F_zd/2.0)*tan(servo_command_limit)) F_xd = F_xd/fabs(F_xd)*(fabs(F_zd/2.0)*tan(servo_command_limit));
 	if(fabs(F_yd) > fabs(F_zd/2.0)*tan(servo_command_limit)) F_yd = F_yd/fabs(F_yd)*(fabs(F_zd/2.0)*tan(servo_command_limit));
 
-
 	double tau_y_d = Py * e_y + Dy * (-imu_ang_vel.z);
 	if(fabs(tau_y_d) > tau_y_limit) tau_y_d = tau_y_d/fabs(tau_y_d)*tau_y_limit;
 
-	//u << tau_r_d, tau_p_d, tau_y_d, Thrust_d;
 	u << tau_r_d, tau_p_d, tau_y_d, F_xd, F_yd, F_zd;
 	torque_d.x = tau_r_d;
 	torque_d.y = tau_p_d;
@@ -652,14 +691,13 @@ void rpyT_ctrl() {
 	// ROS_INFO("tr:%lf, tp:%lf, ty:%lf, Thrust_d:%lf", tau_r_d, tau_p_d, tau_y_d, Thrust_d);
 	// ROS_INFO("%f",Dz*freq*delta_z);
 	ud_to_PWMs(tau_r_d, tau_p_d, tau_y_d, Thrust_d);
-	//ROS_INFO("F_zd : %lf",F_zd);
 }
 
  
 
 void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thrust_des) {
-	/*Counter-rotating type
-	//Conventional type
+	
+	/*//Conventional type
 	F1 = +((double)0.25 / l_arm) * tau_p_des - ((double)0.125 / b_over_k_ratio) * tau_y_des - (double)0.125 * Thrust_des;
 	F2 = +((double)0.25 / l_arm) * tau_r_des + ((double)0.125 / b_over_k_ratio) * tau_y_des - (double)0.125 * Thrust_des;
 	F3 = -((double)0.25 / l_arm) * tau_p_des - ((double)0.125 / b_over_k_ratio) * tau_y_des - (double)0.125 * Thrust_des;
@@ -668,15 +706,10 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 	F6 = +((double)0.25 / l_arm) * tau_r_des - ((double)0.125 / b_over_k_ratio) * tau_y_des - (double)0.125 * Thrust_des;
 	F7 = -((double)0.25 / l_arm) * tau_p_des + ((double)0.125 / b_over_k_ratio) * tau_y_des - (double)0.125 * Thrust_des;
 	F8 = -((double)0.25 / l_arm) * tau_r_des - ((double)0.125 / b_over_k_ratio) * tau_y_des - (double)0.125 * Thrust_des;
- 	
-	//pwm_Command(Force_to_PWM(F1),Force_to_PWM(F2), Force_to_PWM(F3), Force_to_PWM(F4), Force_to_PWM(F5), Force_to_PWM(F6), Force_to_PWM(F7), Force_to_PWM(F8));
-
-
+ 	*/
 	//Tilting type
-	}*/
-	F_cmd = invCM*u;	
-	//Co-rotating type
-	//Conventional type
+    	F_cmd=invCM*u;
+
 	if(Sbus[8]<=1500){
 		F1 = +((double)0.5 / l_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
 		F2 = +((double)0.5 / l_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
@@ -707,7 +740,6 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 	Force.y = F2;
 	Force.z = F3;
 	Force.w = F4;
-	
 	// ROS_INFO("1:%d, 2:%d, 3:%d, 4:%d",PWMs_cmd.data[0], PWMs_cmd.data[1], PWMs_cmd.data[2], PWMs_cmd.data[3]);
 	// ROS_INFO("%f 1:%d, 2:%d, 3:%d, 4:%d",z_d,PWMs_cmd.data[0], PWMs_cmd.data[1], PWMs_cmd.data[2], PWMs_cmd.data[3]);
 }
@@ -737,6 +769,7 @@ double Force_to_PWM(double F) {
 	}
 	return pwm;
 }
+
 
 void jointstateCallback(const sensor_msgs::JointState& msg){
     rac_servo_value=msg;
@@ -788,7 +821,7 @@ sensor_msgs::JointState servo_msg_create(double rr, double rp){
 	servo_msg.position.resize(2);
 	servo_msg.position[0]=rr;
 	servo_msg.position[1]=rp;
-	//ROS_INFO("rr: %lf, rp: %lf",rr,rp);
+
 	return servo_msg;
 }
 
@@ -802,7 +835,6 @@ void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array){
 	
 	return;
 }
-
 
 void batteryCallback(const std_msgs::Int16& msg){
 	int16_t value=msg.data;
@@ -869,7 +901,7 @@ void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg){
 	//ROS_INFO("Linear_velocity - [x: %f  y: %f  z:%f]",v(0),v(1),v(2));
 	//ROS_INFO("Angular_velocity - [x: %f  y: %f  z:%f]",w(0),w(1),w(2));
 }
-
+// ASDF
 bool GUI_Arm_Callback(FAC_MAV::ArmService::Request &req, FAC_MAV::ArmService::Response &res){
 	if(req.Arm_isChecked){
 		isArm = true;
@@ -889,6 +921,26 @@ bool GUI_Kill_Callback(FAC_MAV::KillService::Request &req, FAC_MAV::KillService:
 	}
 	return true;
 }
+
+
+bool GUI_PosCtrlService_Callback(FAC_MAV::PosCtrlService::Request &req, FAC_MAV::PosCtrlService::Response &res){  //ASDF
+	X_d = req.desired_X;
+	Y_d = req.desired_Y;
+	y_d = req.desired_Yaw;
+	z_d = req.desired_Alti;
+	
+	return true;
+}
+
+bool GUI_Hover_Callback(FAC_MAV::HoverService::Request &req, FAC_MAV::HoverService::Response &res)  //ASDF
+{
+	isHover = req.isHover;
+	isHovering = req.isHovering;
+	isLanding = req.isLanding;
+	
+	return true;
+}
+
 
 int32_t pwmMapping(double pwm){
 	return (int32_t)(65535.*pwm/(1./pwm_freq*1000000.));
