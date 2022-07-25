@@ -271,11 +271,11 @@ ros::Publisher force_command;
 
 //Control Matrix---------------------------------------
 //Eigen::MatrixXd CM(4,8);
-Eigen::MatrixXd CM(6,8);
+Eigen::MatrixXd CM(6,6);
 //Eigen::Vector4d u;
 Eigen::VectorXd u(6);
-Eigen::VectorXd F_cmd(8);
-Eigen::MatrixXd invCM(8,6);
+Eigen::VectorXd F_cmd(6);
+Eigen::MatrixXd invCM(6,6);
 //-----------------------------------------------------
 
 //Linear_velocity--------------------------------------
@@ -482,8 +482,8 @@ void publisherSet(){
 	desired_pos.z = z_d;
 	altitude_d.data=z_d;
 	battery_voltage_msg.data=voltage;
-	force_cmd.data.resize(8);
-	for(int i=0;i<8;i++){
+	force_cmd.data.resize(6);
+	for(int i=0;i<6;i++){
 		force_cmd.data[i]=F_cmd(i);
 	}
 	PWMs.publish(PWMs_cmd);
@@ -516,15 +516,15 @@ void setCM(){
 	      -b_over_k_ratio+(l_arm-x_c)*theta1, b_over_k_ratio-(l_arm+y_c)*theta2, -b_over_k_ratio-(l_arm+x_c)*theta1, b_over_k_ratio+(l_arm-y_c)*theta2, b_over_k_ratio+(l_arm-x_c)*theta1, -b_over_k_ratio-(l_arm+y_c)*theta2, b_over_k_ratio-(l_arm+x_c)*theta1, -b_over_k_ratio+(l_arm-y_c)*theta2,
 	      -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0;*/
 	//Co-rotating type
-	CM <<           -y_c,    -(y_c+l_arm),           -y_c,    -(y_c-l_arm), -b_over_k_ratio,    l_servo+z_c,     0,     0,
-                -(l_arm-x_c),             x_c,      l_arm+x_c,             x_c,     l_servo-z_c, b_over_k_ratio,     0,     0,
-              b_over_k_ratio, -b_over_k_ratio, b_over_k_ratio, -b_over_k_ratio,             y_c,           -x_c,     0,     0,
-                           0,               0,              0,               0,             1.0,              0, l_arm, l_arm,
-                           0,               0,              0,               0,               0,            1.0,     0,     0,
-                         1.0,             1.0,            1.0,             1.0,               0,              0,     0,     0;
-       	//invCM = CM.inverse();
-	invCM = CM.completeOrthogonalDecomposition().pseudoInverse();
-	F_cmd << 0, 0, 0, 0, 0, 0, 0, 0;
+	CM <<           -y_c,    -(y_c+l_arm),           -y_c,    -(y_c-l_arm), -b_over_k_ratio,    l_servo+z_c,
+                -(l_arm-x_c),             x_c,      l_arm+x_c,             x_c,     l_servo-z_c, b_over_k_ratio,
+              b_over_k_ratio, -b_over_k_ratio, b_over_k_ratio, -b_over_k_ratio,             y_c,           -x_c,
+                           0,               0,              0,               0,             1.0,              0,
+                           0,               0,              0,               0,               0,            1.0,
+                         1.0,             1.0,            1.0,             1.0,               0,              0;
+       	invCM = CM.inverse();
+	//invCM = CM.completeOrthogonalDecomposition().pseudoInverse();
+	F_cmd << 0, 0, 0, 0, 0, 0;
 }
 
 void rpyT_ctrl() {
@@ -680,10 +680,10 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 		theta2_command = atan2(-F_cmd(4),fabs(F_cmd(1)+F_cmd(3)));
  		if(fabs(theta1_command)>hardware_servo_limit) theta1_command = (theta1_command/fabs(theta1_command))*hardware_servo_limit;
 		if(fabs(theta2_command)>hardware_servo_limit) theta2_command = (theta2_command/fabs(theta2_command))*hardware_servo_limit;
-		F1 = sqrt(pow((F_cmd(5)+F_cmd(7))/(double)2.0,2)+pow(F_cmd(0),2));
-		F2 = sqrt(pow((F_cmd(4)+F_cmd(6))/(double)2.0,2)+pow(F_cmd(1),2));
-		F3 = sqrt(pow((F_cmd(5)-F_cmd(7))/(double)2.0,2)+pow(F_cmd(2),2));
-		F4 = sqrt(pow((F_cmd(4)-F_cmd(6))/(double)2.0,2)+pow(F_cmd(3),2));
+		F1 = sqrt(pow(F_cmd(5)/(double)2.0,2)+pow(F_cmd(0),2));
+		F2 = sqrt(pow(F_cmd(4)/(double)2.0,2)+pow(F_cmd(1),2));
+		F3 = sqrt(pow(F_cmd(5)/(double)2.0,2)+pow(F_cmd(2),2));
+		F4 = sqrt(pow(F_cmd(4)/(double)2.0,2)+pow(F_cmd(3),2));
 		//F1 = fabs(F_cmd(0));
 		//F2 = fabs(F_cmd(1));
 		//F3 = fabs(F_cmd(2));
