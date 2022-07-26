@@ -56,6 +56,7 @@ geometry_msgs::Quaternion rot;
 geometry_msgs::Quaternion desired_value;
 geometry_msgs::Vector3 integrator;
 geometry_msgs::Vector3 desired_pos;
+geometry_msgs::Vector3 F_total;
 
 geometry_msgs::Vector3 t265_att;
 geometry_msgs::Vector3 filtered_angular_rate;
@@ -106,7 +107,7 @@ double beta = 0;
 //General dimensions
 
 static double l_arm = 0.109;// m // diagonal length between thruster : 218mm;
-static double l_servo = -0.045;
+static double l_servo = -0.015;
 static double mass = 1.992;//(Kg)
 double initial_z = 0;
 
@@ -190,6 +191,10 @@ void publisherSet();
 int32_t pwmMapping(double pwm);
 void pwm_Command(double pwm1, double pwm2, double pwm3, double pwm4);
 void pwm_Kill();
+void pwm_Max();
+void pwm_test();
+void pwm_Calibration();
+void kalman_Filtering();
 //-------------------------------------------------------
 
 //Publisher Group--------------------------------------
@@ -206,13 +211,16 @@ ros::Publisher angular_velocity;
 ros::Publisher PWM_generator;
 ros::Publisher desired_position;
 ros::Publisher position;
+ros::Publisher kalman_angular_vel;
+ros::Publisher kalman_angular_accel;
+ros::Publisher net_Force;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
 Eigen::Matrix4d CM;
 Eigen::Matrix4d invCM;
 Eigen::Vector4d u;
-Eigen::Vector4d F;
+Eigen::Vector4d F_cmd;
 //-----------------------------------------------------
 
 //Linear_velocity--------------------------------------
@@ -229,6 +237,23 @@ Eigen::Vector3d w;
 Eigen::Vector3d cam_att;
 Eigen::Matrix3d R_a;
 Eigen::Vector3d t4_att;
+//-----------------------------------------------------
+
+//Kalman_Filter----------------------------------------
+Eigen::MatrixXd F(6,6);
+Eigen::MatrixXd P(6,6);
+Eigen::MatrixXd H(3,6);
+Eigen::MatrixXd Q(6,6);
+Eigen::MatrixXd R(3,3);
+Eigen::MatrixXd K(6,3);
+Eigen::VectorXd x(6);
+Eigen::Vector3d z;
+Eigen::MatrixXd predicted_P(6,6);
+Eigen::VectorXd predicted_x(6);
+Eigen::Matrix3d gain_term;
+Eigen::MatrixXd covariance_term;
+geometry_msgs::Vector3 filtered_Angular_vel;
+geometry_msgs::Vector3 filtered_Angular_accel;
 //-----------------------------------------------------
 double iterator = 0;
 
@@ -272,6 +297,17 @@ int main(int argc, char **argv){
 		y_c=nh.param<double>("y_center_of_mass",0.0);
 		z_c=nh.param<double>("z_center_of_mass",0.0);
 	//----------------------------------------------------------
+	//
+	//Kalman initialization-------------------------------------
+		x << 0, 0, 0, 0, 0, 0;
+		P << Eigen::MatrixXd::Identity(6,6);
+		F << Eigen::MatrixXd::Identity(3,3), 0.005*Eigen::MatrixXd::Identity(3,3),
+		     Eigen::MatrixXd::Zero(3,3), Eigen::MatrixXd::Identity(3,3);
+		H << Eigen::MatrixXd::Identity(3,3), Eigen::MatrixXd::Zero(3,3);
+		Q << Eigen::MatrixXd::Identity(3,3), Eigen::MatrixXd::Zero(3,3),
+		     Eigen::MatrixXd::Zero(3,3), 100.*Eigen::MatrixXd::Identity(3,3);
+		R << 0.0132*Eigen::MatrixXd::Identity(3,3);
+        //----------------------------------------------------------
 	
     	PWMs = nh.advertise<std_msgs::Int16MultiArray>("PWMs", 1);
 	PWM_generator = nh.advertise<std_msgs::Int32MultiArray>("/command",1);
@@ -286,6 +322,9 @@ int main(int argc, char **argv){
 	angular_velocity = nh.advertise<geometry_msgs::Vector3>("gyro",100);
 	desired_position = nh.advertise<geometry_msgs::Vector3>("pos_d",100);
 	position = nh.advertise<geometry_msgs::Vector3>("pos",100);
+	net_Force = nh.advertise<geometry_msgs::Vector3>("F_total",100);
+	kalman_angular_vel = nh.advertise<geometry_msgs::Vector3>("kalman_ang_vel",100);
+	kalman_angular_accel = nh.advertise<geometry_msgs::Vector3>("kalman_ang_accel",100);
 
     	ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     	ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -300,10 +339,13 @@ int main(int argc, char **argv){
     	return 0;
 }
 
+ros::Time loop_timer;
+
 void publisherSet(){
 
 	setCM(); // Setting Control Matrix
-    	//Publish data	
+    	//Publish data
+		
 	if(Sbus[8]>1500){
 		
 	}
@@ -335,8 +377,12 @@ void publisherSet(){
 	else{
 		// ROS_INFO("r:%lf, p:%lf, y:%lf T:%lf", r_d, p_d, y_d, T_d);
 		rpyT_ctrl();	
+	
 	}
 	
+	//pwm_Calibration();
+	//std::cout << H <<std::endl;
+	kalman_Filtering();	
 	angle_d.x=r_d;
 	angle_d.y=p_d;
 	angle_d.z=y_d;
@@ -356,9 +402,12 @@ void publisherSet(){
 	PWM_generator.publish(PWMs_val);
 	desired_position.publish(desired_pos);
 	position.publish(pos);
+	net_Force.publish(F_total);
+	kalman_angular_vel.publish(filtered_Angular_vel);
+	kalman_angular_accel.publish(filtered_Angular_accel);
 	// ROS_INFO("%d %d %d %d",PWMs_cmd.data[0],PWMs_cmd.data[1],PWMs_cmd.data[2],PWMs_cmd.data[3]);
-	// ROS_INFO("loop time : %f",((double)end.sec-(double)begin.sec)+((double)end.nsec-(double)begin.nsec)/1000000000.);
-
+	//ROS_INFO("loop time : %f",(((double)ros::Time::now().sec-(double)loop_timer.sec)+((double)ros::Time::now().nsec-(double)loop_timer.nsec)/1000000000.));
+	loop_timer = ros::Time::now();
 }
 
 void setCM(){
@@ -444,12 +493,12 @@ void rpyT_ctrl() {
 	if (fabs(e_p_i) > integ_limit)	e_p_i = (e_p_i / fabs(e_p_i)) * integ_limit;
 	e_z_i += e_z * ((double)1 / freq);	
 	if (fabs(e_z_i) > z_integ_limit) e_z_i = (e_z_i / fabs(e_z_i)) * z_integ_limit;
-	integrator.x=e_x_i;
-	integrator.y=e_y_i;
+	integrator.x=e_r_i;
+	integrator.y=e_p_i;
 	integrator.z=e_z_i;
 
-	tau_r_d = Pa * e_r + Ia * e_r_i + Da * (-imu_ang_vel.x);// - (double)0.5;
-	tau_p_d = Pa * e_p + Ia * e_p_i + Da * (-imu_ang_vel.y);// + (double)0.2; 
+	tau_r_d = Pa * e_r + Ia * e_r_i + Da * (-imu_ang_vel.x);//- (double)0.48;
+	tau_p_d = Pa * e_p + Ia * e_p_i + Da * (-imu_ang_vel.y);//+ (double)0.18; 
 
 	if(Sbus[5]>1500){
 		Thrust_d =-(Pz * e_z + Iz * e_z_i - Dz * (-v(2)) + mass*g);
@@ -482,8 +531,8 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 	F2 = +((double)0.5 / l_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
 	F3 = -((double)0.5 / l_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
 	F4 = -((double)0.5 / l_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
-
-    	F=invCM*u;
+ 
+    	F_cmd=invCM*u;
 	//ROS_INFO("F1:%lf, F2:%lf, F3:%lf, F4:%lf", F(0), F(1), F(2), F(3));
 	PWMs_cmd.data.resize(4);
 	// PWMs_cmd.data[0] = 1000;
@@ -496,13 +545,16 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 	//PWMs_cmd.data[2] = Force_to_PWM(F3);
 	//PWMs_cmd.data[3] = Force_to_PWM(F4);
 	
-	pwm_Command(Force_to_PWM(F(0)), Force_to_PWM(F(1)), Force_to_PWM(F(2)), Force_to_PWM(F(3)));
+	pwm_Command(Force_to_PWM(F_cmd(0)), Force_to_PWM(F_cmd(1)), Force_to_PWM(F_cmd(2)), Force_to_PWM(F_cmd(3)));
 
 	Force.x=PWMs_val.data[0];
 	Force.y=PWMs_val.data[1];
 	Force.z=PWMs_val.data[2];
 	Force.w=PWMs_val.data[3];
-
+        
+	F_total.x=-theta2*(F_cmd(1)+F_cmd(3));
+	F_total.y=theta1*(F_cmd(0)+F_cmd(2));
+	F_total.z=-F_cmd(0)-F_cmd(1)-F_cmd(2)-F_cmd(3);
 	// ROS_INFO("1:%d, 2:%d, 3:%d, 4:%d",PWMs_cmd.data[0], PWMs_cmd.data[1], PWMs_cmd.data[2], PWMs_cmd.data[3]);
 	// ROS_INFO("%f 1:%d, 2:%d, 3:%d, 4:%d",z_d,PWMs_cmd.data[0], PWMs_cmd.data[1], PWMs_cmd.data[2], PWMs_cmd.data[3]);
 }
@@ -678,16 +730,36 @@ void pwm_Command(double pwm1, double pwm2, double pwm3, double pwm4){
 
 }
 
+void pwm_Max(){
+	PWMs_val.data.resize(16);
+	PWMs_val.data[0] = pwmMapping(2000.);
+	PWMs_val.data[1] = pwmMapping(2000.);
+	PWMs_val.data[2] = pwmMapping(2000.);
+	PWMs_val.data[3] = pwmMapping(2000.);
+	PWMs_val.data[4] = pwmMapping(2000.);
+	PWMs_val.data[5] = pwmMapping(2000.);
+	PWMs_val.data[6] = pwmMapping(2000.);
+	PWMs_val.data[7] = pwmMapping(2000.);
+	PWMs_val.data[8] = -1;
+	PWMs_val.data[9] = -1;
+	PWMs_val.data[10] = -1;
+	PWMs_val.data[11] = -1;
+	PWMs_val.data[12] = -1;
+	PWMs_val.data[13] = -1;
+	PWMs_val.data[14] = -1;
+	PWMs_val.data[15] = -1;
+}
+
 void pwm_Kill(){
 	PWMs_val.data.resize(16);
 	PWMs_val.data[0] = pwmMapping(1000.);
 	PWMs_val.data[1] = pwmMapping(1000.);
 	PWMs_val.data[2] = pwmMapping(1000.);
 	PWMs_val.data[3] = pwmMapping(1000.);
-	PWMs_val.data[4] = -1;
-	PWMs_val.data[5] = -1;
-	PWMs_val.data[6] = -1;
-	PWMs_val.data[7] = -1;
+	PWMs_val.data[4] = pwmMapping(1000.);
+	PWMs_val.data[5] = pwmMapping(1000.);
+	PWMs_val.data[6] = pwmMapping(1000.);
+	PWMs_val.data[7] = pwmMapping(1000.);
 	PWMs_val.data[8] = -1;
 	PWMs_val.data[9] = -1;
 	PWMs_val.data[10] = -1;
@@ -699,3 +771,44 @@ void pwm_Kill(){
 
 }
 
+void pwm_test(){
+	PWMs_val.data.resize(16);
+	PWMs_val.data[0] = pwmMapping(1200.);
+	PWMs_val.data[1] = pwmMapping(1200.);
+	PWMs_val.data[2] = pwmMapping(1200.);
+	PWMs_val.data[3] = pwmMapping(1200.);
+	PWMs_val.data[4] = pwmMapping(1200.);
+	PWMs_val.data[5] = pwmMapping(1200.);
+	PWMs_val.data[6] = pwmMapping(1200.);
+	PWMs_val.data[7] = pwmMapping(1200.);
+	PWMs_val.data[8] = -1;
+	PWMs_val.data[9] = -1;
+	PWMs_val.data[10] = -1;
+	PWMs_val.data[11] = -1;
+	PWMs_val.data[12] = -1;
+	PWMs_val.data[13] = -1;
+	PWMs_val.data[14] = -1;
+	PWMs_val.data[15] = -1;
+
+}
+void pwm_Calibration(){
+	if(Sbus[4]>1500) pwm_test();
+	else pwm_Kill();
+}
+
+void kalman_Filtering(){
+	z << imu_ang_vel.x, imu_ang_vel.y, imu_ang_vel.z;
+	predicted_x = F*x;
+	predicted_P = F*P*F.transpose()+Q;
+	gain_term = H*predicted_P*H.transpose()+R;
+	K=predicted_P*H.transpose()*gain_term.inverse();
+	x=predicted_x+K*(z-H*predicted_x);
+	covariance_term = Eigen::MatrixXd::Identity(6,6)-K*H;
+	P=covariance_term*predicted_P*covariance_term.transpose()+K*R*K.transpose();
+	filtered_Angular_vel.x=x(0);
+	filtered_Angular_vel.y=x(1);
+	filtered_Angular_vel.z=x(2);
+	filtered_Angular_accel.x=x(3);
+	filtered_Angular_accel.y=x(4);
+	filtered_Angular_accel.z=x(5);
+}

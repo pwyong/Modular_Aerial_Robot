@@ -1,0 +1,4 @@
+bool isHover
+bool isHovering
+bool isLanding
+---

@@ -1,0 +1,4 @@
+bool FAC_isHover
+bool FAC_isHovering
+bool FAC_isLanding
+---
