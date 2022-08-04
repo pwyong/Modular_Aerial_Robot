@@ -72,6 +72,11 @@
 		<param name="conv_altitude_I_gain"	value="5.0"/>
 		<param name="conv_altitude_D_gain"	value="10.0"/>
 
+		<!--Conventional Mode Velocity gains-->
+		<param name="conv_velocity_P_gain"	value="3.0"/>	
+		<param name="conv_velocity_I_gain"	value="0.1"/>	
+		<param name="conv_velocity_D_gain"	value="3.0"/>
+
 		<!--Conventional Mode Position gains-->
 		<param name="conv_position_P_gain"	value="3.0"/>	
 		<param name="conv_position_I_gain"	value="0.1"/>	
@@ -92,6 +97,11 @@
 		<param name="tilt_altitude_P_gain"	value="15.0"/>
 		<param name="tilt_altitude_I_gain"	value="5.0"/>
 		<param name="tilt_altitude_D_gain"	value="10.0"/>
+
+		<!--Tilt Mode Velocity gains-->
+		<param name="tilt_velocity_P_gain"	value="3.0"/>	
+		<param name="tilt_velocity_I_gain"	value="0.1"/>	
+		<param name="tilt_velocity_D_gain"	value="3.0"/>
 
 		<!--Tilt Mode Position gains-->
 		<param name="tilt_position_P_gain"	value="3.0"/>	

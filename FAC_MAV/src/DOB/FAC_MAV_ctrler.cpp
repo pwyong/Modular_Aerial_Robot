@@ -98,6 +98,9 @@ double e_y_i = 0;//yaw error integration
 double e_X_i = 0;//X position error integration
 double e_Y_i = 0;//Y position error integration
 double e_Z_i = 0;//Z position error integration
+double e_X_dot_i = 0;//X velocity error integration
+double e_Y_dot_i = 0;//Y velocity error integration
+double e_Z_dot_i = 0;//Z velocity error integration
 
 double tau_r_d = 0;//roll  desired torque (N.m)
 double tau_p_d = 0;//pitch desired torque(N.m)
@@ -119,6 +122,11 @@ double Z_d = 0;//desired altitude
 double X_d_base = 0;//initial desired X position
 double Y_d_base = 0;//initial desired Y position
 double Z_d_base = 0;//initial desired Z position
+
+//Global Desired Global velocity
+double X_dot_d = 0;
+double Y_dot_d = 0;
+double Z_dot_d = 0;
 
 //Global desired acceleration
 double X_ddot_d = 0;
@@ -162,9 +170,10 @@ static double y_d_tangent_deadzone = (double)0.05 * y_vel_limit;//(rad/s)
 static double T_limit = 17;//(N)
 static double altitude_limit = 1;//(m)
 static double XY_limit = 0.5;
-static double hardware_servo_limit=0.3;
-static double XY_ddot_limit=1;
+static double XYZ_dot_limit=1;
+static double XYZ_ddot_limit=1;
 static double alpha_beta_limit=1;
+static double hardware_servo_limit=0.3;
 static double servo_command_limit = 0.1;
 static double tau_y_limit = 0.3;
 
@@ -179,6 +188,7 @@ double z_c=0.0;
 double integ_limit=10;
 double z_integ_limit=100;
 double pos_integ_limit=10;
+double vel_integ_limit=5;
 
 //Roll, Pitch PID gains
 double Pa=3.5;
@@ -195,6 +205,11 @@ double Pz=16.0;
 double Iz=5.0;
 double Dz=15.0;
 
+//Velocity PID gains
+double Pv=5.0;
+double Iv=0.1;
+double Dv=5.0;
+
 //Position PID gains
 double Pp=3.0;
 double Ip=0.1;
@@ -204,12 +219,14 @@ double Dp=5.0;
 double conv_Pa, conv_Ia, conv_Da;
 double conv_Py, conv_Dy;
 double conv_Pz, conv_Iz, conv_Dz;
+double conv_Pv, conv_Iv, conv_Dv;
 double conv_Pp, conv_Ip, conv_Dp;
 
 //Tilt Flight Mode Control Gains
 double tilt_Pa, tilt_Ia, tilt_Da;
 double tilt_Py, tilt_Dy;
 double tilt_Pz, tilt_Iz, tilt_Dz;
+double tilt_Pv, tilt_Iv, tilt_Dv;
 double tilt_Pp, tilt_Ip, tilt_Dp;
 //--------------------------------------------------------
 
@@ -327,7 +344,6 @@ ros::Publisher kalman_angular_vel;
 ros::Publisher kalman_angular_accel;
 ros::Publisher desired_force;
 ros::Publisher battery_voltage;
-ros::Publisher real_voltage;
 ros::Publisher force_command;
 //----------------------------------------------------
 
@@ -405,6 +421,11 @@ int main(int argc, char **argv){
 			conv_Iz=nh.param<double>("conv_altitude_I_gain",5.0);
 			conv_Dz=nh.param<double>("conv_altitude_D_gain",15.0);
 
+			//Velocity PID gains
+			conv_Pv=nh.param<double>("conv_velocity_P_gain",5.0);
+			conv_Iv=nh.param<double>("conv_velocity_I_gain",1.0);
+			conv_Dv=nh.param<double>("conv_velocity_D_gain",5.0);
+
 			//Position PID gains
 			conv_Pp=nh.param<double>("conv_position_P_gain",3.0);
 			conv_Ip=nh.param<double>("conv_position_I_gain",0.1);
@@ -425,10 +446,15 @@ int main(int argc, char **argv){
 			tilt_Iz=nh.param<double>("tilt_altitude_I_gain",5.0);
 			tilt_Dz=nh.param<double>("tilt_altitude_D_gain",10.0);
 
+			//Velocity PID gains
+			tilt_Pv=nh.param<double>("tilt_velocity_P_gain",5.0);
+			tilt_Iv=nh.param<double>("tilt_velocity_I_gain",0.1);
+			tilt_Dv=nh.param<double>("tilt_velocity_D_gain",5.0);
+
 			//Position PID gains
 			tilt_Pp=nh.param<double>("tilt_position_P_gain",3.0);
 			tilt_Ip=nh.param<double>("tilt_position_I_gain",0.1);
-			tilt_Dp=nh.param<double>("tilt_position_D_gain",3.0);
+			tilt_Dp=nh.param<double>("tilt_position_D_gain",5.0);
 
 	//----------------------------------------------------------
 	
@@ -460,7 +486,6 @@ int main(int argc, char **argv){
 	kalman_angular_vel = nh.advertise<geometry_msgs::Vector3>("kalman_ang_vel",100);
 	kalman_angular_accel = nh.advertise<geometry_msgs::Vector3>("kalman_ang_accel",100);
 	battery_voltage = nh.advertise<std_msgs::Float32>("battery_voltage",100);
-	real_voltage = nh.advertise<std_msgs::Float32>("real_voltage",100);
 	force_command = nh.advertise<std_msgs::Float32MultiArray>("force_cmd",100);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
@@ -528,7 +553,6 @@ void publisherSet(){
 	desired_pos.x = X_d;
 	desired_pos.y = Y_d;
 	desired_pos.z = Z_d;
-	battery_voltage_msg.data=voltage;
 	force_cmd.data.resize(6);
 	for(int i=0;i<6;i++){
 		force_cmd.data[i]=F_cmd(i);
@@ -547,7 +571,6 @@ void publisherSet(){
 	kalman_angular_vel.publish(filtered_Angular_vel);
 	kalman_angular_accel.publish(filtered_Angular_accel);
 	battery_voltage.publish(battery_voltage_msg);
-	real_voltage.publish(battery_real_voltage);
 	force_command.publish(force_cmd);
 }
 
@@ -579,10 +602,15 @@ void rpyT_ctrl() {
 	double e_X = 0;
 	double e_Y = 0;
 	double e_Z = 0;
+	double e_X_dot = 0;
+	double e_Y_dot = 0;
 	//double delta_z=pos.z-prev_z;
 	
 	theta1_command = 0.0;
 	theta2_command = 0.0;	
+    double global_X_ddot = imu_lin_acc.z*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.y*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.z)*cos(imu_rpy.y);
+	double global_Y_ddot = imu_lin_acc.y*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.z*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.y)*sin(imu_rpy.y);
+	double global_Z_ddot = g-imu_lin_acc.x*sin(imu_rpy.y)+imu_lin_acc.z*cos(imu_rpy.x)*cos(imu_rpy.y)+imu_lin_acc.y*cos(imu_rpy.y)*sin(imu_rpy.x);
 
 	if(Sbus[6]>1500){
 		X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
@@ -595,22 +623,32 @@ void rpyT_ctrl() {
 		e_Y_i += e_Y * delta_t.count();
 		if (fabs(e_Y_i) > pos_integ_limit) e_Y_i = (e_Y_i / fabs(e_Y_i)) * pos_integ_limit;
 	
-		X_ddot_d = Pp * e_X + Ip * e_X_i - Dp * v(0);
-		Y_ddot_d = Pp * e_Y + Ip * e_Y_i - Dp * v(1);	
-		if(fabs(X_ddot_d) > XY_ddot_limit) X_ddot_d = (X_ddot_d/fabs(X_ddot_d))*XY_ddot_limit;
-		if(fabs(Y_ddot_d) > XY_ddot_limit) Y_ddot_d = (Y_ddot_d/fabs(Y_ddot_d))*XY_ddot_limit;
-
-		alpha=(-sin(imu_rpy.z)*X_ddot_d+cos(imu_rpy.z)*Y_ddot_d)/g;
-		beta=(-cos(imu_rpy.z)*X_ddot_d-sin(imu_rpy.z)*Y_ddot_d)/g;
-		if(fabs(alpha) > alpha_beta_limit) alpha = (alpha/fabs(alpha))*alpha_beta_limit;
-		if(fabs(beta) > alpha_beta_limit) beta = (beta/fabs(beta))*alpha_beta_limit;
+		X_dot_d = Pp * e_X + Ip * e_X_i - Dp * lin_vel.x;
+		Y_dot_d = Pp * e_Y + Ip * e_Y_i - Dp * lin_vel.y;	
+		if(fabs(X_dot_d) > XYZ_dot_limit) X_dot_d = (X_dot_d/fabs(X_dot_d))*XYZ_dot_limit;
+		if(fabs(Y_dot_d) > XYZ_dot_limit) Y_dot_d = (Y_dot_d/fabs(Y_dot_d))*XYZ_dot_limit;
 		
+		e_X_dot = X_dot_d - lin_vel.x;
+		e_Y_dot = Y_dot_d - lin_vel.y;
+		e_X_dot_i += e_X_dot * delta_t.count();
+		if (fabs(e_X_dot_i) > vel_integ_limit) e_X_dot_i = (e_X_dot_i / fabs(e_X_dot_i)) * vel_integ_limit;
+		e_Y_dot_i += e_Y_dot * delta_t.count();
+		if (fabs(e_Y_dot_i) > vel_integ_limit) e_Y_dot_i = (e_Y_dot_i / fabs(e_Y_dot_i)) * vel_integ_limit;
+
+		X_ddot_d = Pv * e_X_dot + Iv * e_X_dot_i - Dv * global_X_ddot;
+		Y_ddot_d = Pv * e_Y_dot + Iv * e_Y_dot_i - Dv * global_Y_ddot;
+		if(fabs(X_ddot_d) > XYZ_ddot_limit) X_ddot_d = (X_ddot_d/fabs(X_ddot_d))*XYZ_ddot_limit;
+		if(fabs(Y_ddot_d) > XYZ_ddot_limit) Y_ddot_d = (Y_ddot_d/fabs(Y_ddot_d))*XYZ_ddot_limit;
 		
 		if(Sbus[8]>1500){
 			r_d = 0.0;
 			p_d = 0.0;
 		}
 		else{
+			alpha=(-sin(imu_rpy.z)*X_ddot_d+cos(imu_rpy.z)*Y_ddot_d)/g;
+			beta=(-cos(imu_rpy.z)*X_ddot_d-sin(imu_rpy.z)*Y_ddot_d)/g;
+			if(fabs(alpha) > alpha_beta_limit) alpha = (alpha/fabs(alpha))*alpha_beta_limit;
+			if(fabs(beta) > alpha_beta_limit) beta = (beta/fabs(beta))*alpha_beta_limit;
 			r_d = asin(alpha);
 			p_d = asin(beta/cos(imu_rpy.x));
 			if(fabs(r_d)>rp_limit) r_d = (r_d/fabs(r_d))*rp_limit;
@@ -642,7 +680,7 @@ void rpyT_ctrl() {
 	tau_y_d = Py * e_y + Dy * (-imu_ang_vel.z);
 	if(fabs(tau_y_d) > tau_y_limit) tau_y_d = tau_y_d/fabs(tau_y_d)*tau_y_limit;
 
-	//DOB
+	//DOB------------------------------------------------------------------------------
 	//Nominal transfer function : q/tau = 1/Js^2    Q - 3rd order butterworth filter
 	//Roll
 	//Q*(Js^2) transfer function to state space 
@@ -675,7 +713,7 @@ void rpyT_ctrl() {
     x_p1 += x_dot_p1*delta_t.count(); 
 	x_p2 += x_dot_p2*delta_t.count(); 
 	x_p3 += x_dot_p3*delta_t.count(); 
-	double tauhat_p = J_x*pow(fq_cutoff,3)*x_p1;
+	double tauhat_p = J_y*pow(fq_cutoff,3)*x_p1;
 
 	//Q transfer function to state space
 	y_dot_p1 = -2*fq_cutoff*y_p1-2*pow(fq_cutoff,2)*y_p2-pow(fq_cutoff,3)*y_p3+tautilde_p_d;
@@ -689,12 +727,44 @@ void rpyT_ctrl() {
 	double dhat_p = tauhat_p - Qtautilde_p;
 
 	tautilde_p_d = tau_p_d - dhat_p;
+
+	//Yaw
+	//Q*(Js^2) transfer function to state space 
+	x_dot_y1 = -2*fq_cutoff*x_y1-2*pow(fq_cutoff,2)*x_y2-pow(fq_cutoff,3)*x_y3+imu_rpy.z;
+	x_dot_y2 = x_y1;
+	x_dot_y3 = x_y2;
+    x_y1 += x_dot_y1*delta_t.count(); 
+	x_y2 += x_dot_y2*delta_t.count(); 
+	x_y3 += x_dot_y3*delta_t.count(); 
+	double tauhat_y = J_z*pow(fq_cutoff,3)*x_y1;
+
+	//Q transfer function to state space
+	y_dot_y1 = -2*fq_cutoff*y_y1-2*pow(fq_cutoff,2)*y_y2-pow(fq_cutoff,3)*y_y3+tautilde_y_d;
+	y_dot_y2 = y_y1;
+	y_dot_y3 = y_y2;
+	y_y1 += y_dot_y1*delta_t.count();
+	y_y2 += y_dot_y2*delta_t.count();
+	y_y3 += y_dot_y3*delta_t.count();
+	double Qtautilde_y = pow(fq_cutoff,3)*y_y3;
+
+	double dhat_y = tauhat_y - Qtautilde_y;
+
+	tautilde_y_d = tau_y_d - dhat_y;
+    //tautilde_y_d = tau_y_d;
+	//--------------------------------------------------------------------------------------
 	if(Sbus[5]>1500){
-		Thrust_d = Pz * e_Z + Iz * e_Z_i - Dz * v(2) - mass*g;
+		Z_dot_d = Pz * e_Z + Iz * e_Z_i - Dz * lin_vel.z;
+		double e_Z_dot = Z_dot_d - lin_vel.z;
+		e_Z_dot_i += e_Z_dot * delta_t.count();
+		if (fabs(e_Z_dot_i) > vel_integ_limit) e_Z_dot_i = (e_Z_dot_i / fabs(e_Z_dot_i)) * vel_integ_limit;
+		Z_ddot_d = Pv * e_Z_dot + Iv * e_Z_dot_i - Dz * global_Z_ddot;
+		if(fabs(Z_ddot_d) > XYZ_ddot_limit) Z_ddot_d = (Z_ddot_d/fabs(Z_ddot_d))*XYZ_ddot_limit;
 		// ROS_INFO("Altitude Control!!");
+		Thrust_d=mass*(Z_ddot_d-g);
 	}
 	else{
-		e_z_i = 0;
+		e_Z_i = 0;
+		e_Z_dot_i = 0;
 		Thrust_d=T_d;
 		// ROS_INFO("Manual Thrust!!");
 	}
@@ -702,7 +772,6 @@ void rpyT_ctrl() {
 	if(Thrust_d > -0.5*mass*g) Thrust_d = -0.5*mass*g;
 	if(Thrust_d < -1.5*mass*g) Thrust_d = -1.5*mass*g;
 
-	Z_ddot_d = Thrust_d/mass+g;
 	F_xd = mass*(X_ddot_d*cos(imu_rpy.z)*cos(imu_rpy.y)+Y_ddot_d*sin(imu_rpy.z)*cos(imu_rpy.y)-(Z_ddot_d-g)*sin(imu_rpy.y));
 	F_yd = mass*(-X_ddot_d*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+Y_ddot_d*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.y)*sin(imu_rpy.z))+(Z_ddot_d-g)*cos(imu_rpy.y)*sin(imu_rpy.x));
 	F_zd = mass*(X_ddot_d*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-Y_ddot_d*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.y)*sin(imu_rpy.z))+(Z_ddot_d-g)*cos(imu_rpy.x)*cos(imu_rpy.y));
@@ -712,7 +781,7 @@ void rpyT_ctrl() {
 	if(fabs(F_yd) > fabs(F_zd/2.0)*tan(servo_command_limit)) F_yd = F_yd/fabs(F_yd)*(fabs(F_zd/2.0)*tan(servo_command_limit));
 
 	//u << tau_r_d, tau_p_d, tau_y_d, Thrust_d;
-	u << tautilde_r_d, tautilde_p_d, tau_y_d, F_xd, F_yd, F_zd;
+	u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_xd, F_yd, F_zd;
 	torque_d.x = tau_r_d;
 	torque_d.y = tau_p_d;
 	torque_d.z = tau_y_d;
@@ -865,12 +934,12 @@ void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array){
 void batteryCallback(const std_msgs::Int16& msg){
 	int16_t value=msg.data;
 	voltage=value*3.3/(double)4096/(7440./(30000.+7440.));
-	battery_real_voltage.data = voltage;
 	double kv=0.08;
 	voltage=kv*voltage+(1-kv)*voltage_old;
 	voltage_old=voltage;
 	if(voltage>16.8) voltage=16.8;
 	if(voltage<13.0) voltage=13.0;
+	battery_voltage_msg.data=voltage;
 }
 
 ros::Time posTimer;
