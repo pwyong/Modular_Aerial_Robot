@@ -791,7 +791,7 @@ void rpyT_ctrl() {
 	//ROS_INFO("xvel:%lf, yvel:%lf, zvel:%lf", imu_ang_vel.x, imu_ang_vel.y, imu_ang_vel.z);
 	// ROS_INFO("tr:%lf, tp:%lf, ty:%lf, Thrust_d:%lf", tau_r_d, tau_p_d, tau_y_d, Thrust_d);
 	// ROS_INFO("%f",Dz*freq*delta_z);
-	ud_to_PWMs(tautilde_r_d, tautilde_p_d, tau_y_d, Thrust_d);
+	ud_to_PWMs(tautilde_r_d, tautilde_p_d, tautilde_y_d, Thrust_d);
 	//ROS_INFO("F_zd : %lf",F_zd);
 }
 
