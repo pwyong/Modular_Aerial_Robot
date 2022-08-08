@@ -859,7 +859,7 @@ double Force_to_PWM(double F) {
 			if(Z_d>Z_d_base && !start_flag) {
 				pwm=param1;
 			}
-			else if(z_d>initial_z) start_flag=true;
+			else if(Z_d<Z_d_base) start_flag=true;
 		}
 		else pwm=param1;
 	}
