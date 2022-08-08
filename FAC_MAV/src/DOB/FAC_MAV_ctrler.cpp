@@ -675,7 +675,7 @@ void rpyT_ctrl() {
 	e_p_i += e_p * delta_t.count();
 	if (fabs(e_p_i) > integ_limit)	e_p_i = (e_p_i / fabs(e_p_i)) * integ_limit;
 	e_Z_i += e_Z * delta_t.count();	
-	if (fabs(e_Z_i) > z_integ_limit) e_Z_i = (e_z_i / fabs(e_Z_i)) * z_integ_limit;
+	if (fabs(e_Z_i) > z_integ_limit) e_Z_i = (e_Z_i / fabs(e_Z_i)) * z_integ_limit;
 
 	tau_r_d = Pa * e_r + Ia * e_r_i + Da * (-imu_ang_vel.x);//- (double)0.48;
 	tau_p_d = Pa * e_p + Ia * e_p_i + Da * (-imu_ang_vel.y);//+ (double)0.18; 
@@ -830,7 +830,7 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 		//F4 = fabs(F_cmd(3));
 	}
 	pwm_Command(Force_to_PWM(F1),Force_to_PWM(F2), Force_to_PWM(F3), Force_to_PWM(F4), Force_to_PWM(F1), Force_to_PWM(F2), Force_to_PWM(F3), Force_to_PWM(F4));
-	Force.resize(4);
+	Force.data.resize(4);
 	Force.data[0] = F1;
 	Force.data[1] = F2;
 	Force.data[2] = F3;
@@ -855,8 +855,8 @@ double Force_to_PWM(double F) {
 	else pwm = param1;
 	if (pwm > 1900)	pwm = 1900;
 	if(Sbus[5]>1500){
-		if(initial_z>=0){
-			if(z_d<initial_z && !start_flag) {
+		if(Z_d_base<=0){
+			if(Z_d>Z_d_base && !start_flag) {
 				pwm=param1;
 			}
 			else if(z_d>initial_z) start_flag=true;
