@@ -314,6 +314,7 @@ sensor_msgs::JointState servo_msg_create(double rr, double rp);
 void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array);
 void batteryCallback(const std_msgs::Int16& msg);
 void posCallback(const geometry_msgs::Vector3& msg);
+void rotCallback(const geometry_msgs::Quaternion& msg);
 void filterCallback(const sensor_msgs::Imu& msg);
 void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg);
 void setCM();
@@ -493,6 +494,7 @@ int main(int argc, char **argv){
     ros::Subscriber rc_in = nh.subscribe("/sbus",100,sbusCallback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber battery_checker = nh.subscribe("/battery",100,batteryCallback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber t265_pos=nh.subscribe("/t265_pos",100,posCallback,ros::TransportHints().tcpNoDelay());
+	ros::Subscriber t265_rot=nh.subscribe("/t265_rot",100,rotCallback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber t265_odom=nh.subscribe("/rs_t265/odom/sample",100,t265OdomCallback,ros::TransportHints().tcpNoDelay());
 	
 	ros::Timer timerPublish = nh.createTimer(ros::Duration(1.0/200.0),std::bind(publisherSet));
@@ -710,7 +712,7 @@ void rpyT_ctrl() {
 	x_dot_p1 = -2*fq_cutoff*x_p1-2*pow(fq_cutoff,2)*x_p2-pow(fq_cutoff,3)*x_p3+imu_rpy.y;
 	x_dot_p2 = x_p1;
 	x_dot_p3 = x_p2;
-    x_p1 += x_dot_p1*delta_t.count(); 
+	x_p1 += x_dot_p1*delta_t.count(); 
 	x_p2 += x_dot_p2*delta_t.count(); 
 	x_p3 += x_dot_p3*delta_t.count(); 
 	double tauhat_p = J_y*pow(fq_cutoff,3)*x_p1;
@@ -768,7 +770,6 @@ void rpyT_ctrl() {
 		Thrust_d=T_d;
 		// ROS_INFO("Manual Thrust!!");
 	}
-
 	if(Thrust_d > -0.5*mass*g) Thrust_d = -0.5*mass*g;
 	if(Thrust_d < -1.5*mass*g) Thrust_d = -1.5*mass*g;
 
@@ -947,14 +948,17 @@ void posCallback(const geometry_msgs::Vector3& msg){
 	pos.x=msg.x;
 	pos.y=msg.y;
 	pos.z=msg.z;
+}
 
-	// ROS_INFO("Translation - [x: %f  y:%f  z:%f]",pos.x,pos.y,pos.z);
-	/*double dt = ((double)ros::Time::now().sec-(double)posTimer.sec)+((double)ros::Time::now().nsec-(double)posTimer.nsec)/1000000000.;
-	z_vel = (pos.z-prev_z)/dt;
-	posTimer = ros::Time::now();
-	prev_z = pos.z;*/
-	//ROS_INFO("z_vel : %f",z_vel);
-
+void rotCallback(const geometry_msgs::Quaternion& msg){
+	rot.x=msg.x;
+	rot.y=msg.y;
+	rot.z=msg.z;
+	rot.w=msg.w;
+	
+	tf::Quaternion quat;
+	tf::quaternionMsgToTF(rot,quat);
+	tf::Matrix3x3(quat).getRPY(t265_att.x,t265_att.y,t265_att.z);	
 }
 
 void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg){
