@@ -76,6 +76,7 @@ geometry_msgs::Vector3 filtered_angular_rate;
 std_msgs::Float32 altitude_d;
 std_msgs::Float32 battery_voltage_msg;
 std_msgs::Float32 battery_real_voltage;
+std_msgs::Float32 dt;
 bool servo_sw=false;
 double theta1_command, theta2_command;
 bool start_flag=false;
@@ -346,15 +347,16 @@ ros::Publisher kalman_angular_accel;
 ros::Publisher desired_force;
 ros::Publisher battery_voltage;
 ros::Publisher force_command;
+ros::Publisher delta_time;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
 //Eigen::MatrixXd CM(4,8);
-Eigen::MatrixXd CM(6,6);
+Eigen::MatrixXd CM(6,8);
 //Eigen::Vector4d u;
 Eigen::VectorXd u(6);
-Eigen::VectorXd F_cmd(6);
-Eigen::MatrixXd invCM(6,6);
+Eigen::VectorXd F_cmd(8);
+Eigen::MatrixXd invCM(8,6);
 //-----------------------------------------------------
 
 //Linear_velocity--------------------------------------
@@ -488,6 +490,7 @@ int main(int argc, char **argv){
 	kalman_angular_accel = nh.advertise<geometry_msgs::Vector3>("kalman_ang_accel",100);
 	battery_voltage = nh.advertise<std_msgs::Float32>("battery_voltage",100);
 	force_command = nh.advertise<std_msgs::Float32MultiArray>("force_cmd",100);
+	delta_time = nh.advertise<std_msgs::Float32>("delta_t",100);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -506,6 +509,7 @@ void publisherSet(){
 
 	end=std::chrono::high_resolution_clock::now();
 	delta_t=end-start; 
+	dt.data=delta_t.count();
 	start=std::chrono::high_resolution_clock::now();
 	if(Sbus[8]<1500){
 		theta1_command=0.0;
@@ -555,8 +559,8 @@ void publisherSet(){
 	desired_pos.x = X_d;
 	desired_pos.y = Y_d;
 	desired_pos.z = Z_d;
-	force_cmd.data.resize(6);
-	for(int i=0;i<6;i++){
+	force_cmd.data.resize(8);
+	for(int i=0;i<8;i++){
 		force_cmd.data[i]=F_cmd(i);
 	}
 	PWMs.publish(PWMs_cmd);
@@ -574,18 +578,19 @@ void publisherSet(){
 	kalman_angular_accel.publish(filtered_Angular_accel);
 	battery_voltage.publish(battery_voltage_msg);
 	force_command.publish(force_cmd);
+	delta_time.publish(dt);
 }
 
 void setCM(){
 	//Co-rotating type
-	CM <<           -y_c,    -(y_c+l_arm),           -y_c,    -(y_c-l_arm), -b_over_k_ratio,    l_servo+z_c,
-                -(l_arm-x_c),             x_c,      l_arm+x_c,             x_c,     l_servo-z_c, b_over_k_ratio,
-              b_over_k_ratio, -b_over_k_ratio, b_over_k_ratio, -b_over_k_ratio,             y_c,           -x_c,
-                           0,               0,              0,               0,             1.0,              0,
-                           0,               0,              0,               0,               0,            1.0,
-                         1.0,             1.0,            1.0,             1.0,               0,              0;
-       	invCM = CM.inverse();
-	F_cmd << 0, 0, 0, 0, 0, 0;
+	CM <<           -y_c,    -(y_c+l_arm),           -y_c,    -(y_c-l_arm), -b_over_k_ratio,    l_servo+z_c,     0,     0,
+                -(l_arm-x_c),             x_c,      l_arm+x_c,             x_c,     l_servo-z_c, b_over_k_ratio,     0,     0,
+              b_over_k_ratio, -b_over_k_ratio, b_over_k_ratio, -b_over_k_ratio,             y_c,           -x_c, l_arm, l_arm,
+                           0,               0,              0,               0,             1.0,              0,     0,     0,
+                           0,               0,              0,               0,               0,            1.0,     0,     0,
+                         1.0,             1.0,            1.0,             1.0,               0,              0,     0,     0;
+       	invCM = CM.completeOrthogonalDecomposition().pseudoInverse();
+	F_cmd << 0, 0, 0, 0, 0, 0, 0, 0;
 }
 
 void rpyT_ctrl() {
@@ -751,8 +756,8 @@ void rpyT_ctrl() {
 
 	double dhat_y = tauhat_y - Qtautilde_y;
 
-	tautilde_y_d = tau_y_d - dhat_y;
-    //tautilde_y_d = tau_y_d;
+	//tautilde_y_d = tau_y_d - dhat_y;
+    	tautilde_y_d = tau_y_d;
 	//--------------------------------------------------------------------------------------
 	if(Sbus[5]>1500){
 		Z_dot_d = Pz * e_Z + Iz * e_Z_i - Dz * lin_vel.z;
@@ -820,10 +825,10 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 		theta2_command = atan2(-F_cmd(4),fabs(F_cmd(1)+F_cmd(3)));
  		if(fabs(theta1_command)>hardware_servo_limit) theta1_command = (theta1_command/fabs(theta1_command))*hardware_servo_limit;
 		if(fabs(theta2_command)>hardware_servo_limit) theta2_command = (theta2_command/fabs(theta2_command))*hardware_servo_limit;
-		F1 = sqrt(pow(F_cmd(5)/(double)2.0,2)+pow(F_cmd(0),2));
-		F2 = sqrt(pow(F_cmd(4)/(double)2.0,2)+pow(F_cmd(1),2));
-		F3 = sqrt(pow(F_cmd(5)/(double)2.0,2)+pow(F_cmd(2),2));
-		F4 = sqrt(pow(F_cmd(4)/(double)2.0,2)+pow(F_cmd(3),2));
+		F1 = sqrt(pow((F_cmd(5)+F_cmd(7))/(double)2.0,2)+pow(F_cmd(0),2));
+		F2 = sqrt(pow((F_cmd(4)+F_cmd(6))/(double)2.0,2)+pow(F_cmd(1),2));
+		F3 = sqrt(pow((F_cmd(5)-F_cmd(7))/(double)2.0,2)+pow(F_cmd(2),2));
+		F4 = sqrt(pow((F_cmd(4)-F_cmd(6))/(double)2.0,2)+pow(F_cmd(3),2));
 		//F1 = fabs(F_cmd(0));
 		//F2 = fabs(F_cmd(1));
 		//F3 = fabs(F_cmd(2));
@@ -889,7 +894,7 @@ void imu_Callback(const sensor_msgs::Imu& msg){
 
     	// TP attitude - Euler representation
     	tf::Matrix3x3(quat).getRPY(imu_rpy.x,imu_rpy.y,imu_rpy.z);
-	base_yaw = cam_att(2);
+	base_yaw = cam_att(2)+pi/4;
     	if(base_yaw - yaw_prev < -pi) yaw_rotate_count++;
 	else if(base_yaw - yaw_prev > pi) yaw_rotate_count--;
 	yaw_now = base_yaw+2*pi*yaw_rotate_count;
@@ -1129,6 +1134,10 @@ void pid_Gain_Setting(){
 		Pz = conv_Pz;
 		Iz = conv_Iz;
 		Dz = conv_Dz;
+		
+		Pv = conv_Pv;
+		Iv = conv_Iv;
+		Dv = conv_Dv;
 
 		Pp = conv_Pp;
 		Ip = conv_Ip;
@@ -1145,6 +1154,10 @@ void pid_Gain_Setting(){
 		Pz = tilt_Pz;
 		Iz = tilt_Iz;
 		Dz = tilt_Dz;
+		
+		Pv = tilt_Pv;
+		Iv = tilt_Iv;
+		Dv = tilt_Dv;
 
 		Pp = tilt_Pp;
 		Ip = tilt_Ip;

@@ -31,11 +31,12 @@
 #include <geometry_msgs/Transform.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/static_transform_broadcaster.h>
-#include "FAC_MAV/ArmService.h" //ASDF
-#include "FAC_MAV/KillService.h" //ASDF
-#include "FAC_MAV/PosCtrlService.h" //ASDF
-#include "FAC_MAV/HoverService.h" //ASDF
-#include "FAC_MAV/FAC_HoverService.h" //ASDF
+#include "FAC_MAV/ArmService.h" 
+#include "FAC_MAV/KillService.h" 
+#include "FAC_MAV/PosCtrlService.h" 
+#include "FAC_MAV/HoverService.h"
+#include "FAC_MAV/FAC_HoverService.h"
+#include "FAC_MAV/TiltService.h"
 
 #include "nav_msgs/Odometry.h"
 
@@ -133,6 +134,25 @@ double yaw_prev = 0;
 double yaw_now = 0;
 double base_yaw = 0;
 int yaw_rotate_count = 0;
+
+//-----------------------GUI control parameter---------------------------//
+double Landing_time = 2.0; //put landing time (sec)
+double Hovering_time = 1.0; //put Hovering time (sec)
+double X_Speed = 0.2; //desired value change speed of x_axis
+double Y_Speed = 0.2; //desired value change speed of y_axis
+double yaw_Speed = 0.2; //desired value change speed of yaw
+double Z_Speed = 0.2; //desired value change speed of z_axis
+//---------------------------------------------------------//
+double Landing_Inc = 1 / (freq * Landing_time);
+double Hovering_Inc = 1 / (freq * Hovering_time);
+double X_Inc = X_Speed / freq;
+double Y_Inc = Y_Speed / freq;
+double yaw_Inc = yaw_Speed / freq;
+double z_Inc = Z_Speed / freq;
+double X_Goal = 0;
+double Y_Goal = 0;
+double y_Goal = 0;
+double z_Goal = 0;
 //--------------------------------------------------------
 
 //General dimensions
@@ -224,8 +244,9 @@ bool isArm = false;  //ASDF
 bool isHover = false; //ASDF
 bool isHovering = false; //ASDF
 bool isLanding = false; //ASDF
-int Hover_Checker = 0; //ASDF
-int Land_Checker = 0; //ASDF
+bool isTilt = false;
+int Hover_Checker = 0;
+int Land_Checker = 0;
 //--------------------------------------------------------
 
 //Function------------------------------------------------
@@ -259,7 +280,8 @@ void kalman_Filtering();
 bool GUI_Arm_Callback(FAC_MAV::ArmService::Request &req, FAC_MAV::ArmService::Response &res); // for Arm ASDF 
 bool GUI_Kill_Callback(FAC_MAV::KillService::Request &req, FAC_MAV::KillService::Response &res); // for Kill
 bool GUI_PosCtrlService_Callback(FAC_MAV::PosCtrlService::Request &req, FAC_MAV::PosCtrlService::Response &res); // ASDF for Hover, Land, Positon_ctrl
-bool GUI_Hover_Callback(FAC_MAV::HoverService::Request &req, FAC_MAV::HoverService::Response &res);  //ASDF
+bool GUI_Tilt_Callback(FAC_MAV::TiltService::Request &req, FAC_MAV::TiltService::Response &res); 
+bool GUI_Hover_Callback(FAC_MAV::HoverService::Request &req, FAC_MAV::HoverService::Response &res);  
 void pid_Gain_Setting();
 //-------------------------------------------------------
 
@@ -283,7 +305,7 @@ ros::Publisher desired_force;
 ros::Publisher battery_voltage;
 ros::Publisher real_voltage;
 ros::Publisher force_command;
-ros::ServiceClient HoverClient; //ASDF
+ros::ServiceClient HoverClient;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
@@ -311,7 +333,7 @@ Eigen::Matrix3d R_a;
 Eigen::Vector3d t4_att;
 //-----------------------------------------------------
 //GUIClient
-FAC_MAV::FAC_HoverService Service;  //ASDF
+//FAC_MAV::FAC_HoverService Service;  //ASDF
 
 //Kalman_Filter----------------------------------------
 Eigen::MatrixXd F(6,6);
@@ -442,7 +464,8 @@ int main(int argc, char **argv){
 	ros::ServiceServer KillService = nh.advertiseService("/KillService", GUI_Kill_Callback); //ASDF
 	ros::ServiceServer PosCtrlService = nh.advertiseService("/PosCtrlService", GUI_PosCtrlService_Callback); //ASDF
 	ros::ServiceServer HoverService = nh.advertiseService("/HoverService", GUI_Hover_Callback); //ASDF
-    	HoverClient = nh.serviceClient<FAC_MAV::FAC_HoverService>("/FAC_HoverService"); //ASDF
+    	//HoverClient = nh.serviceClient<FAC_MAV::FAC_HoverService>("/FAC_HoverService"); //ASDF
+	ros::ServiceServer TiltService = nh.advertiseService("/TiltService", GUI_Tilt_Callback);
 
 	ros::Timer timerPublish = nh.createTimer(ros::Duration(1.0/200.0),std::bind(publisherSet));
     	ros::spin();
@@ -455,7 +478,7 @@ void publisherSet(){
     	//Publish data
 		
 	
-	if(Sbus[8]<1500){
+	if(!isTilt){
 		theta1_command=0.0;
 		theta2_command=0.0;
 	}
@@ -540,64 +563,54 @@ void setCM(){
 	F_cmd << 0, 0, 0, 0, 0, 0;
 }
 void rpyT_ctrl() {
-	
-/*AAAA ASDF
-	y_d_tangent=y_vel_limit*(((double)Sbus[0]-(double)1500)/(double)500);
-	if(fabs(y_d_tangent)<y_d_tangent_deadzone || fabs(y_d_tangent)>y_vel_limit) y_d_tangent=0;
-	y_d+=y_d_tangent;
-	
-	z_d=altitude_limit*(((double)Sbus[2]-(double)1500)/(double)500)+altitude_limit;
-	T_d =-T_limit*(((double)Sbus[2]-(double)1500)/(double)500)-T_limit;
-*/
-	if(isLanding) //ASDF
+
+	pid_Gain_Setting();	
+	if(isLanding)
 	{
-		if(z_d>-0.1) z_d -=0.002; //10초동안 Landing 함. 최종 desired alti = 10cm 정도
+		if(z_d>-0.1) z_d -= Landing_Inc; // 2.5초간 하강 ASDF
 		else
 		{
-			if(pos.z<0.15)  //대충 15cm 정도
+			if(pos.z<0.15)
 			{
 				Land_Checker ++;
 
-					if(Land_Checker>=200) //3초간 유지
+					if(Land_Checker>=100) //0.5초간 유지 ASDF
 					{
-						isLanding = false;   //고도가 15cm 이하로 떨어지면 Arm 모드로 전환
-						isHover = false;    //
-						Service.request.FAC_isLanding = false;
-						Service.request.FAC_isHover = false;    //GUI에게 Landing이 끝났다고 알려주기.
-						Service.request.FAC_isHovering = false;
-						HoverClient.call(Service);
+						isLanding = false;
+						isHover = false; //ASDF
+						isArm = false; //ASDF
+						//Service.request.FAC_isLanding = false;
+						//Service.request.FAC_isHover = false;
+						//Service.request.FAC_isHovering = false;
+						//HoverClient.call(Service);
 					}
 			}
 			else Land_Checker = 0;		
 		}
 	}
 
-	if(isHovering) //ASDF
-	{
-		if(z_d<=1) z_d +=0.002; //5초동안 1m 올라감.
+	if(isHovering){
+		if(z_d<=1) z_d += Hovering_Inc; // 2.5초간 상승 ASDF
 		else
 		{
-			if(pos.z>0.9 && pos.z<1.1)  //1미터 +- 10cm 범위내에 도달하면
-			{
-			Hover_Checker ++;
+			//if(pos.z>0.9 && pos.z<1.1)  //1미터 +- 10cm 범위내에 도달하면
+			//{
+			//Hover_Checker ++;
 
-				if(Hover_Checker >= 600)    //3초동안 
-				{
-					isHovering = false;     //Hovering 끝, Hovered 상태.
-					Service.request.FAC_isHovering = false;
-					Service.request.FAC_isHover = true;   //GUI에게 Hovering이 끝났다고 알려주기.
-					Service.request.FAC_isLanding = false;
-					HoverClient.call(Service);
-				}
-			}
-			else Hover_Checker = 0;
+				//if(Hover_Checker >= 600)
+				//{
+					isHovering = false;
+					//Service.request.FAC_isHovering = false;
+					//Service.request.FAC_isHover = true;
+					//Service.request.FAC_isLanding = false;
+					//HoverClient.call(Service);
+					z_Goal = z_d;
+				//}
+			//}
+			//else Hover_Checker = 0;
 		
 		}
 	}
-//poz.z가 1보다 큰거 말고 z_d가 1 일 때 pos.z가 얼마인지 판단해서 호버링 완료인지 아닌지로 판단
-//몆 루프동안 poz.z가 z_d 범위 안에 도달하면 hovering 성공이다 이렇게 쓰자.
-
-
 
 	double e_r = 0;
 	double e_p = 0;
@@ -605,11 +618,21 @@ void rpyT_ctrl() {
 	double e_X = 0;
 	double e_Y = 0;
 	double e_z = z_d - pos.z;
-	//double delta_z=pos.z-prev_z;
 	
-	theta1_command = 0.0;
-	theta2_command = 0.0;	
+	if (!isHovering || !isLanding )
+	{
+		if(X_Goal - X_d >= X_Inc ) X_d +=X_Inc;
+		if(X_Goal - X_d <= -X_Inc ) X_d -=X_Inc;
 
+		if(Y_Goal - Y_d >= Y_Inc ) Y_d +=Y_Inc;
+		if(Y_Goal - Y_d <= -Y_Inc) Y_d -=Y_Inc;   
+
+		if(y_Goal - y_d >= yaw_Inc ) y_d +=yaw_Inc; //ASDF
+		if(y_Goal - y_d <= -yaw_Inc) y_d -=yaw_Inc;
+
+		if(z_Goal - z_d >= z_Inc ) z_d +=z_Inc;
+		if(z_Goal - z_d <= -z_Inc) z_d -=z_Inc;
+	}
 	e_X = X_d - pos.x;
 	e_Y = Y_d - pos.y;
 	e_x_i += e_X * ((double)1 / freq);
@@ -627,11 +650,13 @@ void rpyT_ctrl() {
 	if(fabs(alpha) > alpha_beta_limit) alpha = (alpha/fabs(alpha))*alpha_beta_limit;
 	if(fabs(beta) > alpha_beta_limit) beta = (beta/fabs(beta))*alpha_beta_limit;
 
-	if(Sbus[8]>1500){ //ASDF
+	if(isTilt){
 		r_d = 0.0;
 		p_d = 0.0;
 	}
 	else{
+		theta1_command = 0.0;
+		theta2_command = 0.0;
 		r_d = asin(alpha);
 		p_d = asin(beta/cos(imu_rpy.x));
 		if(fabs(r_d)>rp_limit) r_d = (r_d/fabs(r_d))*rp_limit;
@@ -710,7 +735,7 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 	//Tilting type
     	F_cmd=invCM*u;
 
-	if(Sbus[8]<=1500){
+	if(!isTilt){
 		F1 = +((double)0.5 / l_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
 		F2 = +((double)0.5 / l_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
 		F3 = -((double)0.5 / l_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
@@ -922,12 +947,21 @@ bool GUI_Kill_Callback(FAC_MAV::KillService::Request &req, FAC_MAV::KillService:
 	return true;
 }
 
+bool GUI_Tilt_Callback(FAC_MAV::TiltService::Request &req, FAC_MAV::TiltService::Response &res){
+	if(req.Tilt_isChecked){
+		isTilt = true;
+	}
+	else{
+		isTilt = false;
+	}
+	return true;
+}
 
 bool GUI_PosCtrlService_Callback(FAC_MAV::PosCtrlService::Request &req, FAC_MAV::PosCtrlService::Response &res){  //ASDF
-	X_d = req.desired_X;
-	Y_d = req.desired_Y;
-	y_d = req.desired_Yaw;
-	z_d = req.desired_Alti;
+	X_Goal = req.desired_X;
+	Y_Goal = req.desired_Y;
+	y_Goal = req.desired_Yaw;
+	z_Goal = req.desired_Alti;
 	
 	return true;
 }
@@ -1078,7 +1112,7 @@ void kalman_Filtering(){
 }
 
 void pid_Gain_Setting(){
-	if(Sbus[8]<=1500){
+	if(!isTilt){
 		Pa = conv_Pa;
 	       	Ia = conv_Ia;
 		Da = conv_Da;
@@ -1093,6 +1127,7 @@ void pid_Gain_Setting(){
 		Pp = conv_Pp;
 		Ip = conv_Ip;
 		Dp = conv_Dp;
+		//ROS_INFO("conv");
 	}
 	else{
 		Pa = tilt_Pa;
@@ -1109,6 +1144,7 @@ void pid_Gain_Setting(){
 		Pp = tilt_Pp;
 		Ip = tilt_Ip;
 		Dp = tilt_Dp;
+		//ROS_INFO("tilt");
 	}
 	//ROS_INFO("%.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf ",Pa, Ia, Da, Py, Dy, Pz, Iz, Dz, Pp, Ip, Dp);
 }

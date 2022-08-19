@@ -63,19 +63,19 @@
     		<param name="conv_attitude_rp_D_gain"	value="0.45"/>
 
 		<!--Conventional Mode attitude_y gain-->
-		<param name="conv_attitude_y_P_gain"	value="3.8"/>
+		<param name="conv_attitude_y_P_gain"	value="2.0"/>
 		<!--<param name="conv_attitude_y_I_gain"	value="0"/>-->
 		<param name="conv_attitude_y_D_gain"	value="0.2"/>
 
 		<!--Conventional Mode Altitude gains-->
-		<param name="conv_altitude_P_gain"	value="15.0"/>
-		<param name="conv_altitude_I_gain"	value="5.0"/>
-		<param name="conv_altitude_D_gain"	value="10.0"/>
+		<param name="conv_altitude_P_gain"	value="5.0"/>
+		<param name="conv_altitude_I_gain"	value="1.0"/>
+		<param name="conv_altitude_D_gain"	value="5.0"/>
 
 		<!--Conventional Mode Velocity gains-->
 		<param name="conv_velocity_P_gain"	value="3.0"/>	
 		<param name="conv_velocity_I_gain"	value="0.1"/>	
-		<param name="conv_velocity_D_gain"	value="3.0"/>
+		<param name="conv_velocity_D_gain"	value="0.5"/>
 
 		<!--Conventional Mode Position gains-->
 		<param name="conv_position_P_gain"	value="3.0"/>	
@@ -94,21 +94,21 @@
 		<param name="tilt_attitude_y_D_gain"	value="0.2"/>
 
 		<!--Tilt Mode Altitude gains-->
-		<param name="tilt_altitude_P_gain"	value="15.0"/>
-		<param name="tilt_altitude_I_gain"	value="5.0"/>
-		<param name="tilt_altitude_D_gain"	value="10.0"/>
+		<param name="tilt_altitude_P_gain"	value="5.0"/>
+		<param name="tilt_altitude_I_gain"	value="1.0"/>
+		<param name="tilt_altitude_D_gain"	value="5.0"/>
 
 		<!--Tilt Mode Velocity gains-->
 		<param name="tilt_velocity_P_gain"	value="3.0"/>	
 		<param name="tilt_velocity_I_gain"	value="0.1"/>	
-		<param name="tilt_velocity_D_gain"	value="3.0"/>
+		<param name="tilt_velocity_D_gain"	value="0.5"/>
 
 		<!--Tilt Mode Position gains-->
 		<param name="tilt_position_P_gain"	value="3.0"/>	
 		<param name="tilt_position_I_gain"	value="0.1"/>	
 		<param name="tilt_position_D_gain"	value="3.0"/>	
 
-    <node name="FAC_MAV_node"  pkg="FAC_MAV" type="FAC_MAV_ctrler"  output="screen"/>
+    <node name="FAC_MAV_DOB_node"  pkg="FAC_MAV" type="FAC_MAV_DOB_ctrler"  output="screen"/>
 
     <!-- Rosbag -->
     <node pkg="rosbag" type="record" name="record" output="screen" args="-o /home/pwyong/Desktop/catkin_ws/src/FAC_MAV/bag/ -a" /><!-- /angle /desired_angle /Forces /t265_pos /desired_altitude"/> -->
