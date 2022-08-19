@@ -583,13 +583,13 @@ void publisherSet(){
 
 void setCM(){
 	//Co-rotating type
-	CM <<           -y_c,    -(y_c+l_arm),           -y_c,    -(y_c-l_arm), -b_over_k_ratio,    l_servo+z_c,     0,     0,
+	CM <<               -y_c,    -(y_c+l_arm),           -y_c,    -(y_c-l_arm), -b_over_k_ratio,    l_servo+z_c,     0,     0,
                 -(l_arm-x_c),             x_c,      l_arm+x_c,             x_c,     l_servo-z_c, b_over_k_ratio,     0,     0,
               b_over_k_ratio, -b_over_k_ratio, b_over_k_ratio, -b_over_k_ratio,             y_c,           -x_c, l_arm, l_arm,
                            0,               0,              0,               0,             1.0,              0,     0,     0,
                            0,               0,              0,               0,               0,            1.0,     0,     0,
                          1.0,             1.0,            1.0,             1.0,               0,              0,     0,     0;
-       	invCM = CM.completeOrthogonalDecomposition().pseudoInverse();
+    invCM = CM.completeOrthogonalDecomposition().pseudoInverse();
 	F_cmd << 0, 0, 0, 0, 0, 0, 0, 0;
 }
 
@@ -756,8 +756,8 @@ void rpyT_ctrl() {
 
 	double dhat_y = tauhat_y - Qtautilde_y;
 
-	//tautilde_y_d = tau_y_d - dhat_y;
-    	tautilde_y_d = tau_y_d;
+	tautilde_y_d = tau_y_d - dhat_y;
+    //tautilde_y_d = tau_y_d;
 	//--------------------------------------------------------------------------------------
 	if(Sbus[5]>1500){
 		Z_dot_d = Pz * e_Z + Iz * e_Z_i - Dz * lin_vel.z;
@@ -979,9 +979,14 @@ void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg){
 	                0.,           0.,  1.;
 
 	v = R_v*cam_v;
-	lin_vel.x=v(0);
-	lin_vel.y=v(1);
-	lin_vel.z=v(2);
+
+	double global_X_dot = v(2)*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-v(1)*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+v(0)*cos(imu_rpy.z)*cos(imu_rpy.y);
+	double global_Y_dot = v(1)*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))-v(2)*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))+v(0)*cos(imu_rpy.y)*sin(imu_rpy.y);
+	double global_Z_dot = -v(0)*sin(imu_rpy.y)+v(2)*cos(imu_rpy.x)*cos(imu_rpy.y)+v(1)*cos(imu_rpy.y)*sin(imu_rpy.x);
+
+	lin_vel.x=global_X_dot;
+	lin_vel.y=global_Y_dot;
+	lin_vel.z=global_Z_dot;
 	//ROS_INFO("Attitude - [r: %f  p: %f  y:%f]",cam_att(0),cam_att(1),cam_att(2));
 	//ROS_INFO("Linear_velocity - [x: %f  y: %f  z:%f]",v(0),v(1),v(2));
 	//ROS_INFO("Angular_velocity - [x: %f  y: %f  z:%f]",w(0),w(1),w(2));
@@ -1125,7 +1130,7 @@ void kalman_Filtering(){
 void pid_Gain_Setting(){
 	if(Sbus[8]<=1500){
 		Pa = conv_Pa;
-	       	Ia = conv_Ia;
+		Ia = conv_Ia;
 		Da = conv_Da;
 
 		Py = conv_Py;
