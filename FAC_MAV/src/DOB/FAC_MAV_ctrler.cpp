@@ -171,8 +171,8 @@ static double y_d_tangent_deadzone = (double)0.05 * y_vel_limit;//(rad/s)
 static double T_limit = 17;//(N)
 static double altitude_limit = 1;//(m)
 static double XY_limit = 0.5;
-static double XYZ_dot_limit=1;
-static double XYZ_ddot_limit=1;
+static double XYZ_dot_limit=2;
+static double XYZ_ddot_limit=2;
 static double alpha_beta_limit=1;
 static double hardware_servo_limit=0.3;
 static double servo_command_limit = 0.1;
@@ -761,6 +761,7 @@ void rpyT_ctrl() {
 	//--------------------------------------------------------------------------------------
 	if(Sbus[5]>1500){
 		Z_dot_d = Pp * e_Z + Ip * e_Z_i - Dp * lin_vel.z;
+		if(fabs(Z_dot_d) > XYZ_dot_limit) Z_dot_d = (Z_dot_d/fabs(Z_dot_d))*XYZ_dot_limit;
 		double e_Z_dot = Z_dot_d - lin_vel.z;
 		e_Z_dot_i += e_Z_dot * delta_t.count();
 		if (fabs(e_Z_dot_i) > vel_integ_limit) e_Z_dot_i = (e_Z_dot_i / fabs(e_Z_dot_i)) * vel_integ_limit;
