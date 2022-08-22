@@ -189,7 +189,7 @@ double z_c=0.0;
 double integ_limit=10;
 double z_integ_limit=100;
 double pos_integ_limit=10;
-double vel_integ_limit=5;
+double vel_integ_limit=10;
 
 //Roll, Pitch PID gains
 double Pa=3.5;
@@ -201,12 +201,12 @@ double Da=0.5;
 double Py=2.0;
 double Dy=0.1;
 
-//Altitude PID gains
+//Z Velocity PID gains
 double Pz=16.0;
 double Iz=5.0;
 double Dz=15.0;
 
-//Velocity PID gains
+//XY Velocity PID gains
 double Pv=5.0;
 double Iv=0.1;
 double Dv=5.0;
@@ -242,7 +242,7 @@ double voltage_old=16.0;
 
 
 //-DOB----------------------------------------------------
-double fq_cutoff=10;//Q filter Cut-off frequency
+double fq_cutoff=5;//Q filter Cut-off frequency
 
 // Nominal MoI
 double J_x = 0.01;
@@ -756,15 +756,15 @@ void rpyT_ctrl() {
 
 	double dhat_y = tauhat_y - Qtautilde_y;
 
-	tautilde_y_d = tau_y_d - dhat_y;
-    //tautilde_y_d = tau_y_d;
+	//tautilde_y_d = tau_y_d - dhat_y;
+    	tautilde_y_d = tau_y_d;
 	//--------------------------------------------------------------------------------------
 	if(Sbus[5]>1500){
-		Z_dot_d = Pz * e_Z + Iz * e_Z_i - Dz * lin_vel.z;
+		Z_dot_d = Pp * e_Z + Ip * e_Z_i - Dp * lin_vel.z;
 		double e_Z_dot = Z_dot_d - lin_vel.z;
 		e_Z_dot_i += e_Z_dot * delta_t.count();
 		if (fabs(e_Z_dot_i) > vel_integ_limit) e_Z_dot_i = (e_Z_dot_i / fabs(e_Z_dot_i)) * vel_integ_limit;
-		Z_ddot_d = Pv * e_Z_dot + Iv * e_Z_dot_i - Dz * global_Z_ddot;
+		Z_ddot_d = Pz * e_Z_dot + Iz * e_Z_dot_i - Dz * global_Z_ddot;
 		if(fabs(Z_ddot_d) > XYZ_ddot_limit) Z_ddot_d = (Z_ddot_d/fabs(Z_ddot_d))*XYZ_ddot_limit;
 		// ROS_INFO("Altitude Control!!");
 		Thrust_d=mass*(Z_ddot_d-g);
@@ -859,6 +859,7 @@ double Force_to_PWM(double F) {
 	}
 	else pwm = param1;
 	if (pwm > 1900)	pwm = 1900;
+	if(pwm < 1100) pwm = 1100;
 	if(Sbus[5]>1500){
 		if(Z_d_base<=0){
 			if(Z_d>Z_d_base && !start_flag) {
