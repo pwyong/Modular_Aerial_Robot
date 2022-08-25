@@ -151,7 +151,7 @@ int yaw_rotate_count = 0;
 
 //General dimensions
 
-static double l_arm = 0.109;// m // diagonal length between thruster : 218mm;
+static double r_arm = 0.109;// m // diagonal length between thruster : 218mm;
 static double l_servo = 0.015;
 static double mass = 2.365;//(Kg)
 
@@ -175,7 +175,7 @@ static double XYZ_dot_limit=2;
 static double XYZ_ddot_limit=2;
 static double alpha_beta_limit=1;
 static double hardware_servo_limit=0.3;
-static double servo_command_limit = 0.1;
+static double servo_command_limit = 0.2;
 static double tau_y_limit = 0.3;
 
 double x_c=0.0;
@@ -352,11 +352,11 @@ ros::Publisher delta_time;
 
 //Control Matrix---------------------------------------
 //Eigen::MatrixXd CM(4,8);
-Eigen::MatrixXd CM(6,8);
+Eigen::MatrixXd CM(4,4);
 //Eigen::Vector4d u;
-Eigen::VectorXd u(6);
-Eigen::VectorXd F_cmd(8);
-Eigen::MatrixXd invCM(8,6);
+Eigen::VectorXd u(4);
+Eigen::VectorXd F_cmd(4);
+Eigen::MatrixXd invCM(4,4);
 //-----------------------------------------------------
 
 //Linear_velocity--------------------------------------
@@ -473,6 +473,7 @@ int main(int argc, char **argv){
         //----------------------------------------------------------
 	//Set Control Matrix----------------------------------------
 		setCM();
+                F_cmd << 0, 0, 0, 0;
 	//----------------------------------------------------------
     PWMs = nh.advertise<std_msgs::Int16MultiArray>("PWMs", 1); // PWM 1,2,3,4
 	PWM_generator = nh.advertise<std_msgs::Int32MultiArray>("/command",1);  // publish to pca9685
@@ -511,19 +512,16 @@ void publisherSet(){
 	delta_t=end-start; 
 	dt.data=delta_t.count();
 	start=std::chrono::high_resolution_clock::now();
-	if(Sbus[8]<1500){
-		theta1_command=0.0;
-		theta2_command=0.0;
-	}
+
 	if(Sbus[6]<=1500){
 		X_d_base=pos.x;
 		Y_d_base=pos.y;
 		X_d = X_d_base;
 		Y_d = Y_d_base;
 		e_X_i=0;
+		e_X_dot_i=0;
 		e_Y_i=0;
-		e_Z_i=0;
-		
+		e_Y_dot_i=0;		
 	}
 
 	if(Sbus[4]<1500/*isKill*/){	
@@ -532,9 +530,14 @@ void publisherSet(){
 		e_r_i = 0;
 		e_p_i = 0;
 		e_Z_i = 0;
+		e_Z_dot_i=0;
 		e_X_i=0;
+		e_X_dot_i=0;
 		e_Y_i=0;
+		e_Y_dot_i=0;
 		start_flag=false;
+		theta1_command=0.0;
+		theta2_command=0.0;
 		pwm_Kill();	
 	}
 	else{
@@ -563,6 +566,11 @@ void publisherSet(){
 	for(int i=0;i<8;i++){
 		force_cmd.data[i]=F_cmd(i);
 	}
+	Force.data.resize(4);
+	Force.data[0] = F1;
+	Force.data[1] = F2;
+	Force.data[2] = F3;
+	Force.data[3] = F4;
 	PWMs.publish(PWMs_cmd);
 	euler.publish(imu_rpy);
 	desired_angle.publish(angle_d);
@@ -583,18 +591,15 @@ void publisherSet(){
 
 void setCM(){
 	//Co-rotating type
-	CM <<               -y_c,    -(y_c+l_arm),           -y_c,    -(y_c-l_arm), -b_over_k_ratio,    l_servo+z_c,     0,     0,
-                -(l_arm-x_c),             x_c,      l_arm+x_c,             x_c,     l_servo-z_c, b_over_k_ratio,     0,     0,
-              b_over_k_ratio, -b_over_k_ratio, b_over_k_ratio, -b_over_k_ratio,             y_c,           -x_c, l_arm, l_arm,
-                           0,               0,              0,               0,             1.0,              0,     0,     0,
-                           0,               0,              0,               0,               0,            1.0,     0,     0,
-                         1.0,             1.0,            1.0,             1.0,               0,              0,     0,     0;
-    invCM = CM.completeOrthogonalDecomposition().pseudoInverse();
-	F_cmd << 0, 0, 0, 0, 0, 0, 0, 0;
+	CM <<          (l_servo+z_c)*sin(theta1)+y_c*cos(theta1),  (r_arm+y_c)*cos(theta2)+b_over_k_ratio*sin(theta2),           (l_servo+z_c)*sin(theta1)+y_c*cos(theta1), -(r_arm-y_c)*cos(theta2)+b_over_k_ratio*sin(theta2),
+              (r_arm-x_c)*cos(theta1)+b_over_k_ratio*sin(theta1),          (-l_servo+z_c)*sin(theta2)-x_c*cos(theta2), -(r_arm+x_c)*cos(theta1)+b_over_k_ratio*sin(theta1),          (-l_servo+z_c)*sin(theta2)-x_c*cos(theta2),
+              (r_arm-x_c)*sin(theta1)-b_over_k_ratio*cos(theta1), -(r_arm+y_c)*sin(theta2)+b_over_k_ratio*cos(theta2), -(r_arm+x_c)*sin(theta1)-b_over_k_ratio*cos(theta1),  (r_arm-y_c)*sin(theta2)+b_over_k_ratio*cos(theta2),
+                                                    -cos(theta1),                                        -cos(theta2),                                        -cos(theta1),                                        -cos(theta2);
+    	invCM = CM.inverse();
 }
 
 void rpyT_ctrl() {
-	
+	setCM();
 	pid_Gain_Setting();
 	y_d_tangent=y_vel_limit*(((double)Sbus[0]-(double)1500)/(double)500);
 	if(fabs(y_d_tangent)<y_d_tangent_deadzone || fabs(y_d_tangent)>y_vel_limit) y_d_tangent=0;
@@ -612,9 +617,7 @@ void rpyT_ctrl() {
 	double e_X_dot = 0;
 	double e_Y_dot = 0;
 	//double delta_z=pos.z-prev_z;
-	
-	theta1_command = 0.0;
-	theta2_command = 0.0;	
+		
     double global_X_ddot = imu_lin_acc.z*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.y*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.z)*cos(imu_rpy.y);
 	double global_Y_ddot = imu_lin_acc.y*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.z*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.y)*sin(imu_rpy.z);
 	double global_Z_ddot = g-imu_lin_acc.x*sin(imu_rpy.y)+imu_lin_acc.z*cos(imu_rpy.x)*cos(imu_rpy.y)+imu_lin_acc.y*cos(imu_rpy.y)*sin(imu_rpy.x);
@@ -788,7 +791,7 @@ void rpyT_ctrl() {
 	if(fabs(F_yd) > fabs(F_zd/2.0)*tan(servo_command_limit)) F_yd = F_yd/fabs(F_yd)*(fabs(F_zd/2.0)*tan(servo_command_limit));
 
 	//u << tau_r_d, tau_p_d, tau_y_d, Thrust_d;
-	u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_xd, F_yd, F_zd;
+	u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_zd;
 	torque_d.x = tau_r_d;
 	torque_d.y = tau_p_d;
 	torque_d.z = tau_y_d;
@@ -806,30 +809,30 @@ void rpyT_ctrl() {
 
 void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thrust_des) {	
  	
-	//pwm_Command(Force_to_PWM(F1),Force_to_PWM(F2), Force_to_PWM(F3), Force_to_PWM(F4), Force_to_PWM(F5), Force_to_PWM(F6), Force_to_PWM(F7), Force_to_PWM(F8));
-	F_cmd = invCM*u;	
-	//Co-rotating type
+	//Co-rotating coaxial
 	//Conventional type
 	if(Sbus[8]<=1500){
-		F1 = +((double)0.5 / l_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
-		F2 = +((double)0.5 / l_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
-		F3 = -((double)0.5 / l_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
-		F4 = -((double)0.5 / l_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
+		F1 = +((double)0.5 / r_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
+		F2 = +((double)0.5 / r_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
+		F3 = -((double)0.5 / r_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
+		F4 = -((double)0.5 / r_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
 		//ROS_INFO("%lf %lf %lf %lf",F1,F2,F3,F4);
+		theta1_command = 0.0;
+                theta2_command = 0.0;
 	}
 	//Tilting type
 	else {
-		
-		// F_cmd = [F_(1,z) F_(2,z) F_(3,z) F_(4,z) F_x F_y F_xg F_yg]
+		F_cmd = invCM*u;
+		// F_cmd = [F1 F2 F3 F4]
 		//ROS_INFO("%lf",-F_cmd(5));
-		theta1_command = atan2(F_cmd(5),fabs(F_cmd(0)+F_cmd(2)));
-		theta2_command = atan2(-F_cmd(4),fabs(F_cmd(1)+F_cmd(3)));
+		theta1_command = asin(F_yd/(F_cmd(0)+F_cmd(2)));
+		theta2_command = asin(-F_xd/(F_cmd(1)+F_cmd(3)));
  		if(fabs(theta1_command)>hardware_servo_limit) theta1_command = (theta1_command/fabs(theta1_command))*hardware_servo_limit;
 		if(fabs(theta2_command)>hardware_servo_limit) theta2_command = (theta2_command/fabs(theta2_command))*hardware_servo_limit;
-		F1 = sqrt(pow((F_cmd(5)+F_cmd(7))/(double)2.0,2)+pow(F_cmd(0),2));
-		F2 = sqrt(pow((F_cmd(4)+F_cmd(6))/(double)2.0,2)+pow(F_cmd(1),2));
-		F3 = sqrt(pow((F_cmd(5)-F_cmd(7))/(double)2.0,2)+pow(F_cmd(2),2));
-		F4 = sqrt(pow((F_cmd(4)-F_cmd(6))/(double)2.0,2)+pow(F_cmd(3),2));
+		F1 = F_cmd(0);
+		F2 = F_cmd(1);
+		F3 = F_cmd(2);
+		F4 = F_cmd(3);
 		//F1 = fabs(F_cmd(0));
 		//F2 = fabs(F_cmd(1));
 		//F3 = fabs(F_cmd(2));
@@ -874,10 +877,10 @@ double Force_to_PWM(double F) {
 }
 
 void jointstateCallback(const sensor_msgs::JointState& msg){
-    rac_servo_value=msg;
+    	rac_servo_value=msg;
 	theta1=-msg.position[1];
 	theta2=-msg.position[0];
-    //ROS_INFO("theta1:%lf   theta2:%lf",theta1, theta2);
+    	ROS_INFO("theta1:%lf   theta2:%lf",theta1, theta2);
 }
 
 ros::Time imuTimer;
