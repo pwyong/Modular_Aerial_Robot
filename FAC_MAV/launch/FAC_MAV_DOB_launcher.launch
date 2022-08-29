@@ -9,7 +9,7 @@
         <arg name="baud_rate"   		default="4500000"/>
 	<arg name="profile_velocity"		default="0"/>
 	<arg name="profile_acceleration"	default="0"/>
-	<arg name="position_p_gain"		default="1700"/>
+	<arg name="position_p_gain"		default="1500"/>
 	<arg name="position_i_gain"		default="500"/>
 	<arg name="position_d_gain"		default="300"/>
     </include>
@@ -67,18 +67,18 @@
 		<!--<param name="conv_attitude_y_I_gain"	value="0"/>-->
 		<param name="conv_attitude_y_D_gain"	value="0.2"/>
 
-		<!--Conventional Mode Altitude Velocity gains-->
-		<param name="conv_altitude_P_gain"	value="10.0"/>
-		<param name="conv_altitude_I_gain"	value="3.0"/>
-		<param name="conv_altitude_D_gain"	value="3.0"/>
+		<!--Conventional Mode Altitude gains-->
+		<param name="conv_altitude_P_gain"	value="15.0"/>
+		<param name="conv_altitude_I_gain"	value="5.0"/>
+		<param name="conv_altitude_D_gain"	value="10.0"/>
 
-		<!--Conventional Mode Horizontaol Velocity gains-->
-		<param name="conv_velocity_P_gain"	value="1.5"/>	
+		<!--Conventional Mode Velocity gains-->
+		<param name="conv_velocity_P_gain"	value="1.0"/>	
 		<param name="conv_velocity_I_gain"	value="0.0"/>	
-		<param name="conv_velocity_D_gain"	value="0.05"/>
+		<param name="conv_velocity_D_gain"	value="0.0"/>
 
-		<!--Conventional Mode Position gains-->
-		<param name="conv_position_P_gain"	value="5.0"/>	
+		<!--Conventional Mode Horizontal Position gains-->
+		<param name="conv_position_P_gain"	value="3.0"/>	
 		<param name="conv_position_I_gain"	value="1.0"/>	
 		<param name="conv_position_D_gain"	value="3.0"/>
 	
@@ -89,19 +89,19 @@
 		<param name="tilt_attitude_rp_D_gain"	value="0.45"/>
 
 		<!--Tilt Mode attitude_y gains-->
-		<param name="tilt_attitude_y_P_gain"	value="1.5"/>
+		<param name="tilt_attitude_y_P_gain"	value="2.0"/>
 		<!--<param name="tilt_attitude_y_I_gain"	value="0"/>-->
 		<param name="tilt_attitude_y_D_gain"	value="0.2"/>
 
 		<!--Tilt Mode Altitude gains-->
-		<param name="tilt_altitude_P_gain"	value="5.0"/>
-		<param name="tilt_altitude_I_gain"	value="3.0"/>
-		<param name="tilt_altitude_D_gain"	value="1.0"/>
+		<param name="tilt_altitude_P_gain"	value="15.0"/>
+		<param name="tilt_altitude_I_gain"	value="5.0"/>
+		<param name="tilt_altitude_D_gain"	value="10.0"/>
 
 		<!--Tilt Mode Velocity gains-->
-		<param name="tilt_velocity_P_gain"	value="1.5"/>	
+		<param name="tilt_velocity_P_gain"	value="1.0"/>	
 		<param name="tilt_velocity_I_gain"	value="0.0"/>	
-		<param name="tilt_velocity_D_gain"	value="0.05"/>
+		<param name="tilt_velocity_D_gain"	value="0.0"/>
 
 		<!--Tilt Mode Position gains-->
 		<param name="tilt_position_P_gain"	value="3.0"/>	

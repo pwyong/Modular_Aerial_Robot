@@ -171,8 +171,8 @@ static double y_d_tangent_deadzone = (double)0.05 * y_vel_limit;//(rad/s)
 static double T_limit = 17;//(N)
 static double altitude_limit = 1;//(m)
 static double XY_limit = 0.5;
-static double XYZ_dot_limit=2;
-static double XYZ_ddot_limit=2;
+static double XYZ_dot_limit=1;
+static double XYZ_ddot_limit=1;
 static double alpha_beta_limit=1;
 static double hardware_servo_limit=0.3;
 static double servo_command_limit = 0.2;
@@ -242,7 +242,7 @@ double voltage_old=16.0;
 
 
 //-DOB----------------------------------------------------
-double fq_cutoff=5;//Q filter Cut-off frequency
+double fq_cutoff=1.0;//Q filter Cut-off frequency
 
 // Nominal MoI
 double J_x = 0.01;
@@ -562,10 +562,6 @@ void publisherSet(){
 	desired_pos.x = X_d;
 	desired_pos.y = Y_d;
 	desired_pos.z = Z_d;
-	force_cmd.data.resize(8);
-	for(int i=0;i<8;i++){
-		force_cmd.data[i]=F_cmd(i);
-	}
 	Force.data.resize(4);
 	Force.data[0] = F1;
 	Force.data[1] = F2;
@@ -653,6 +649,9 @@ void rpyT_ctrl() {
 		if(Sbus[8]>1500){
 			r_d = 0.0;
 			p_d = 0.0;
+			F_xd = mass*(X_ddot_d*cos(imu_rpy.z)*cos(imu_rpy.y)+Y_ddot_d*sin(imu_rpy.z)*cos(imu_rpy.y)-(Z_ddot_d-g)*sin(imu_rpy.y));
+			F_yd = mass*(-X_ddot_d*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+Y_ddot_d*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.y)*sin(imu_rpy.z))+(Z_ddot_d-g)*cos(imu_rpy.y)*sin(imu_rpy.x));
+	
 		}
 		else{
 			alpha=(-sin(imu_rpy.z)*X_ddot_d+cos(imu_rpy.z)*Y_ddot_d)/g;
@@ -667,9 +666,20 @@ void rpyT_ctrl() {
 		}
 	}
 	else{
-		r_d=rp_limit*(((double)Sbus[3]-(double)1500)/(double)500);
-		p_d=rp_limit*(((double)Sbus[1]-(double)1500)/(double)500);
-		//ROS_INFO("Attidue Control!!");
+		if(Sbus[8]>1500){
+			r_d = 0.0;
+			p_d = 0.0;
+			F_xd=-mass*XYZ_ddot_limit*(((double)Sbus[1]-(double)1500)/(double)500);
+			F_yd=mass*XYZ_ddot_limit*(((double)Sbus[3]-(double)1500)/(double)500);
+
+		}
+		else{
+			r_d=rp_limit*(((double)Sbus[3]-(double)1500)/(double)500);
+			p_d=rp_limit*(((double)Sbus[1]-(double)1500)/(double)500);
+			//ROS_INFO("Attidue Control!!");
+			F_xd=0.0;
+			F_yd=0.0;
+		}
 	}
 	
 	e_r = r_d - imu_rpy.x;
@@ -763,35 +773,29 @@ void rpyT_ctrl() {
     	tautilde_y_d = tau_y_d;
 	//--------------------------------------------------------------------------------------
 	if(Sbus[5]>1500){
-		Z_dot_d = Pp * e_Z + Ip * e_Z_i - Dp * lin_vel.z;
+		Z_dot_d = Pz * e_Z + Iz * e_Z_i - Dz * lin_vel.z;
 		if(fabs(Z_dot_d) > XYZ_dot_limit) Z_dot_d = (Z_dot_d/fabs(Z_dot_d))*XYZ_dot_limit;
 		double e_Z_dot = Z_dot_d - lin_vel.z;
 		e_Z_dot_i += e_Z_dot * delta_t.count();
 		if (fabs(e_Z_dot_i) > vel_integ_limit) e_Z_dot_i = (e_Z_dot_i / fabs(e_Z_dot_i)) * vel_integ_limit;
-		Z_ddot_d = Pz * e_Z_dot + Iz * e_Z_dot_i - Dz * global_Z_ddot;
+		Z_ddot_d = Pv * e_Z_dot + Iv * e_Z_dot_i - Dv * global_Z_ddot;
 		if(fabs(Z_ddot_d) > XYZ_ddot_limit) Z_ddot_d = (Z_ddot_d/fabs(Z_ddot_d))*XYZ_ddot_limit;
 		// ROS_INFO("Altitude Control!!");
-		Thrust_d=mass*(Z_ddot_d-g);
+		if(Sbus[6]>1500) F_zd = mass*(X_ddot_d*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-Y_ddot_d*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.y)*sin(imu_rpy.z))+(Z_ddot_d-g)*cos(imu_rpy.x)*cos(imu_rpy.y));
+		else F_zd = mass*(Z_ddot_d-g);
 	}
 	else{
 		e_Z_i = 0;
 		e_Z_dot_i = 0;
-		Thrust_d=T_d;
+		F_zd=T_d;
 		// ROS_INFO("Manual Thrust!!");
 	}
-	if(Thrust_d > -0.5*mass*g) Thrust_d = -0.5*mass*g;
-	if(Thrust_d < -1.5*mass*g) Thrust_d = -1.5*mass*g;
-
-	F_xd = mass*(X_ddot_d*cos(imu_rpy.z)*cos(imu_rpy.y)+Y_ddot_d*sin(imu_rpy.z)*cos(imu_rpy.y)-(Z_ddot_d-g)*sin(imu_rpy.y));
-	F_yd = mass*(-X_ddot_d*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+Y_ddot_d*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.y)*sin(imu_rpy.z))+(Z_ddot_d-g)*cos(imu_rpy.y)*sin(imu_rpy.x));
-	F_zd = mass*(X_ddot_d*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-Y_ddot_d*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.y)*sin(imu_rpy.z))+(Z_ddot_d-g)*cos(imu_rpy.x)*cos(imu_rpy.y));
 	if(F_zd > -0.5*mass*g) F_zd = -0.5*mass*g;
 	if(F_zd < -1.5*mass*g) F_zd = -1.5*mass*g;
-	if(fabs(F_xd) > fabs(F_zd/2.0)*tan(servo_command_limit)) F_xd = F_xd/fabs(F_xd)*(fabs(F_zd/2.0)*tan(servo_command_limit));
-	if(fabs(F_yd) > fabs(F_zd/2.0)*tan(servo_command_limit)) F_yd = F_yd/fabs(F_yd)*(fabs(F_zd/2.0)*tan(servo_command_limit));
 
-	//u << tau_r_d, tau_p_d, tau_y_d, Thrust_d;
-	u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_zd;
+
+	u << tau_r_d, tau_p_d, tau_y_d, F_zd;
+	//u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_zd;
 	torque_d.x = tau_r_d;
 	torque_d.y = tau_p_d;
 	torque_d.z = tau_y_d;
@@ -801,7 +805,8 @@ void rpyT_ctrl() {
 	//ROS_INFO("xvel:%lf, yvel:%lf, zvel:%lf", imu_ang_vel.x, imu_ang_vel.y, imu_ang_vel.z);
 	// ROS_INFO("tr:%lf, tp:%lf, ty:%lf, Thrust_d:%lf", tau_r_d, tau_p_d, tau_y_d, Thrust_d);
 	// ROS_INFO("%f",Dz*freq*delta_z);
-	ud_to_PWMs(tautilde_r_d, tautilde_p_d, tautilde_y_d, Thrust_d);
+	ud_to_PWMs(tau_r_d, tau_p_d, tau_y_d, Thrust_d);
+	//ud_to_PWMs(tautilde_r_d, tautilde_p_d, tautilde_y_d, Thrust_d);
 	//ROS_INFO("F_zd : %lf",F_zd);
 }
 
@@ -811,39 +816,24 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
  	
 	//Co-rotating coaxial
 	//Conventional type
+	F_cmd = invCM*u;
 	if(Sbus[8]<=1500){
-		F1 = +((double)0.5 / r_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
-		F2 = +((double)0.5 / r_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
-		F3 = -((double)0.5 / r_arm) * tau_p_des - ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
-		F4 = -((double)0.5 / r_arm) * tau_r_des + ((double)0.25 / b_over_k_ratio) * tau_y_des - (double)0.25 * Thrust_des;
-		//ROS_INFO("%lf %lf %lf %lf",F1,F2,F3,F4);
 		theta1_command = 0.0;
                 theta2_command = 0.0;
 	}
 	//Tilting type
 	else {
-		F_cmd = invCM*u;
-		// F_cmd = [F1 F2 F3 F4]
-		//ROS_INFO("%lf",-F_cmd(5));
 		theta1_command = asin(F_yd/(F_cmd(0)+F_cmd(2)));
 		theta2_command = asin(-F_xd/(F_cmd(1)+F_cmd(3)));
  		if(fabs(theta1_command)>hardware_servo_limit) theta1_command = (theta1_command/fabs(theta1_command))*hardware_servo_limit;
 		if(fabs(theta2_command)>hardware_servo_limit) theta2_command = (theta2_command/fabs(theta2_command))*hardware_servo_limit;
-		F1 = F_cmd(0);
-		F2 = F_cmd(1);
-		F3 = F_cmd(2);
-		F4 = F_cmd(3);
-		//F1 = fabs(F_cmd(0));
-		//F2 = fabs(F_cmd(1));
-		//F3 = fabs(F_cmd(2));
-		//F4 = fabs(F_cmd(3));
 	}
+	F1 = F_cmd(0);
+	F2 = F_cmd(1);
+	F3 = F_cmd(2);
+	F4 = F_cmd(3);
+
 	pwm_Command(Force_to_PWM(F1),Force_to_PWM(F2), Force_to_PWM(F3), Force_to_PWM(F4), Force_to_PWM(F1), Force_to_PWM(F2), Force_to_PWM(F3), Force_to_PWM(F4));
-	Force.data.resize(4);
-	Force.data[0] = F1;
-	Force.data[1] = F2;
-	Force.data[2] = F3;
-	Force.data[3] = F4;
 	
 	// ROS_INFO("1:%d, 2:%d, 3:%d, 4:%d",PWMs_cmd.data[0], PWMs_cmd.data[1], PWMs_cmd.data[2], PWMs_cmd.data[3]);
 	// ROS_INFO("%f 1:%d, 2:%d, 3:%d, 4:%d",z_d,PWMs_cmd.data[0], PWMs_cmd.data[1], PWMs_cmd.data[2], PWMs_cmd.data[3]);
@@ -878,9 +868,9 @@ double Force_to_PWM(double F) {
 
 void jointstateCallback(const sensor_msgs::JointState& msg){
     	rac_servo_value=msg;
-	theta1=-msg.position[1];
-	theta2=-msg.position[0];
-    	ROS_INFO("theta1:%lf   theta2:%lf",theta1, theta2);
+	theta1=msg.position[0];
+	theta2=-msg.position[1];
+    	//ROS_INFO("theta1:%lf   theta2:%lf",theta1, theta2);
 }
 
 ros::Time imuTimer;
