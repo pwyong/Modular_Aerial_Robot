@@ -513,6 +513,8 @@ void publisherSet(){
 	dt.data=delta_t.count();
 	start=std::chrono::high_resolution_clock::now();
 
+	setCM();
+
 	if(Sbus[6]<=1500){
 		X_d_base=pos.x;
 		Y_d_base=pos.y;
@@ -587,7 +589,7 @@ void publisherSet(){
 
 void setCM(){
 	//Co-rotating type
-	CM <<          (l_servo+z_c)*sin(theta1)+y_c*cos(theta1),  (r_arm+y_c)*cos(theta2)+b_over_k_ratio*sin(theta2),           (l_servo+z_c)*sin(theta1)+y_c*cos(theta1), -(r_arm-y_c)*cos(theta2)+b_over_k_ratio*sin(theta2),
+	CM <<              (l_servo+z_c)*sin(theta1)+y_c*cos(theta1),  (r_arm+y_c)*cos(theta2)+b_over_k_ratio*sin(theta2),           (l_servo+z_c)*sin(theta1)+y_c*cos(theta1), -(r_arm-y_c)*cos(theta2)+b_over_k_ratio*sin(theta2),
               (r_arm-x_c)*cos(theta1)+b_over_k_ratio*sin(theta1),          (-l_servo+z_c)*sin(theta2)-x_c*cos(theta2), -(r_arm+x_c)*cos(theta1)+b_over_k_ratio*sin(theta1),          (-l_servo+z_c)*sin(theta2)-x_c*cos(theta2),
               (r_arm-x_c)*sin(theta1)-b_over_k_ratio*cos(theta1), -(r_arm+y_c)*sin(theta2)+b_over_k_ratio*cos(theta2), -(r_arm+x_c)*sin(theta1)-b_over_k_ratio*cos(theta1),  (r_arm-y_c)*sin(theta2)+b_over_k_ratio*cos(theta2),
                                                     -cos(theta1),                                        -cos(theta2),                                        -cos(theta1),                                        -cos(theta2);
@@ -595,7 +597,6 @@ void setCM(){
 }
 
 void rpyT_ctrl() {
-	setCM();
 	pid_Gain_Setting();
 	y_d_tangent=y_vel_limit*(((double)Sbus[0]-(double)1500)/(double)500);
 	if(fabs(y_d_tangent)<y_d_tangent_deadzone || fabs(y_d_tangent)>y_vel_limit) y_d_tangent=0;
@@ -793,11 +794,18 @@ void rpyT_ctrl() {
 	if(F_zd > -0.5*mass*g) F_zd = -0.5*mass*g;
 	if(F_zd < -1.5*mass*g) F_zd = -1.5*mass*g;
 
+<<<<<<< Updated upstream
 
 	u << tau_r_d, tau_p_d, tau_y_d, F_zd;
 	//u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_zd;
 	torque_d.x = tau_r_d;
 	torque_d.y = tau_p_d;
+=======
+	//u << tau_r_d, tau_p_d, tau_y_d, Thrust_d;
+	u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_zd;
+	torque_d.x = tautilde_r_d;
+	torque_d.y = tautilde_p_d;
+>>>>>>> Stashed changes
 	torque_d.z = tau_y_d;
 	force_d.x = F_xd;
 	force_d.y = F_yd;
@@ -819,7 +827,7 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 	F_cmd = invCM*u;
 	if(Sbus[8]<=1500){
 		theta1_command = 0.0;
-                theta2_command = 0.0;
+        theta2_command = 0.0;
 	}
 	//Tilting type
 	else {
