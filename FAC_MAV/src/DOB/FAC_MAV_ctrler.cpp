@@ -48,7 +48,7 @@ int16_t PWM_d;
 int16_t loop_time;
 std_msgs::Int16MultiArray PWMs_cmd;
 std_msgs::Int32MultiArray PWMs_val;
-std_msgs::Float32MultiArray Force; //Only for plotting in Python (Hard to use Float32MultiArray)
+std_msgs::Float32MultiArray Force;
 
 sensor_msgs::JointState rac_servo_value;
 sensor_msgs::Imu imu;
@@ -70,6 +70,7 @@ geometry_msgs::Vector3 F_total;
 geometry_msgs::Vector3 torque_d;
 geometry_msgs::Vector3 force_d;
 std_msgs::Float32MultiArray force_cmd;
+geometry_msgs::Vector3 desired_lin_vel;
 
 geometry_msgs::Vector3 t265_att;
 geometry_msgs::Vector3 filtered_angular_rate;
@@ -242,7 +243,7 @@ double voltage_old=16.0;
 
 
 //-DOB----------------------------------------------------
-double fq_cutoff=1.0;//Q filter Cut-off frequency
+double fq_cutoff=0.5;//Q filter Cut-off frequency
 
 // Nominal MoI
 double J_x = 0.01;
@@ -348,6 +349,7 @@ ros::Publisher desired_force;
 ros::Publisher battery_voltage;
 ros::Publisher force_command;
 ros::Publisher delta_time;
+ros::Publisher desired_velocity;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
@@ -492,6 +494,7 @@ int main(int argc, char **argv){
 	battery_voltage = nh.advertise<std_msgs::Float32>("battery_voltage",100);
 	force_command = nh.advertise<std_msgs::Float32MultiArray>("force_cmd",100);
 	delta_time = nh.advertise<std_msgs::Float32>("delta_t",100);
+	desired_velocity = nh.advertise<geometry_msgs::Vector3>("lin_vel_d",100);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -585,6 +588,7 @@ void publisherSet(){
 	battery_voltage.publish(battery_voltage_msg);
 	force_command.publish(force_cmd);
 	delta_time.publish(dt);
+	desired_velocity.publish(desired_lin_vel);
 }
 
 void setCM(){
@@ -631,7 +635,9 @@ void rpyT_ctrl() {
 		if (fabs(e_Y_i) > pos_integ_limit) e_Y_i = (e_Y_i / fabs(e_Y_i)) * pos_integ_limit;
 	
 		X_dot_d = Pp * e_X + Ip * e_X_i - Dp * lin_vel.x;
-		Y_dot_d = Pp * e_Y + Ip * e_Y_i - Dp * lin_vel.y;	
+		desired_lin_vel.x = X_dot_d;
+		Y_dot_d = Pp * e_Y + Ip * e_Y_i - Dp * lin_vel.y;
+		desired_lin_vel.y = Y_dot_d;	
 		if(fabs(X_dot_d) > XYZ_dot_limit) X_dot_d = (X_dot_d/fabs(X_dot_d))*XYZ_dot_limit;
 		if(fabs(Y_dot_d) > XYZ_dot_limit) Y_dot_d = (Y_dot_d/fabs(Y_dot_d))*XYZ_dot_limit;
 		
@@ -774,13 +780,14 @@ void rpyT_ctrl() {
     	tautilde_y_d = tau_y_d;
 	//--------------------------------------------------------------------------------------
 	if(Sbus[5]>1500){
-		Z_dot_d = Pz * e_Z + Iz * e_Z_i - Dz * lin_vel.z;
-		if(fabs(Z_dot_d) > XYZ_dot_limit) Z_dot_d = (Z_dot_d/fabs(Z_dot_d))*XYZ_dot_limit;
-		double e_Z_dot = Z_dot_d - lin_vel.z;
-		e_Z_dot_i += e_Z_dot * delta_t.count();
-		if (fabs(e_Z_dot_i) > vel_integ_limit) e_Z_dot_i = (e_Z_dot_i / fabs(e_Z_dot_i)) * vel_integ_limit;
-		Z_ddot_d = Pv * e_Z_dot + Iv * e_Z_dot_i - Dv * global_Z_ddot;
-		if(fabs(Z_ddot_d) > XYZ_ddot_limit) Z_ddot_d = (Z_ddot_d/fabs(Z_ddot_d))*XYZ_ddot_limit;
+		Z_ddot_d = Pz * e_Z + Iz * e_Z_i - Dz * lin_vel.z;
+		desired_lin_vel.z = Z_ddot_d;
+		//if(fabs(Z_dot_d) > XYZ_dot_limit) Z_dot_d = (Z_dot_d/fabs(Z_dot_d))*XYZ_dot_limit;
+		//double e_Z_dot = Z_dot_d - lin_vel.z;
+		//e_Z_dot_i += e_Z_dot * delta_t.count();
+		//if (fabs(e_Z_dot_i) > vel_integ_limit) e_Z_dot_i = (e_Z_dot_i / fabs(e_Z_dot_i)) * vel_integ_limit;
+		//Z_ddot_d = Pv * e_Z_dot + Iv * e_Z_dot_i - Dv * global_Z_ddot;
+		//if(fabs(Z_ddot_d) > XYZ_ddot_limit) Z_ddot_d = (Z_ddot_d/fabs(Z_ddot_d))*XYZ_ddot_limit;
 		// ROS_INFO("Altitude Control!!");
 		if(Sbus[6]>1500) F_zd = mass*(X_ddot_d*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-Y_ddot_d*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.y)*sin(imu_rpy.z))+(Z_ddot_d-g)*cos(imu_rpy.x)*cos(imu_rpy.y));
 		else F_zd = mass*(Z_ddot_d-g);
@@ -794,18 +801,10 @@ void rpyT_ctrl() {
 	if(F_zd > -0.5*mass*g) F_zd = -0.5*mass*g;
 	if(F_zd < -1.5*mass*g) F_zd = -1.5*mass*g;
 
-<<<<<<< Updated upstream
-
-	u << tau_r_d, tau_p_d, tau_y_d, F_zd;
-	//u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_zd;
-	torque_d.x = tau_r_d;
-	torque_d.y = tau_p_d;
-=======
-	//u << tau_r_d, tau_p_d, tau_y_d, Thrust_d;
+	//u << tau_r_d, tau_p_d, tau_y_d, F_zd;
 	u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_zd;
 	torque_d.x = tautilde_r_d;
 	torque_d.y = tautilde_p_d;
->>>>>>> Stashed changes
 	torque_d.z = tau_y_d;
 	force_d.x = F_xd;
 	force_d.y = F_yd;
@@ -851,11 +850,13 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 
 double Force_to_PWM(double F) {
 	double pwm;
-	double param1 = 610;
-	double param2 = 100000;
-	double param3 = 230730;
-	//Force=1E-05*PWM^2-0.0096*PWM-0.5279
-	//PWM=610+(100000*Force+230730)^0.5
+	double A = -9.8*pow(10.0,-8.0)*pow(voltage,2.0)+3.23*pow(10.0,-6.0)*voltage-1.8*pow(10.0,-5.0);
+	double B = 0.000243*pow(voltage,2.0)-0.00663*voltage+0.03723;
+	double C = -0.11063*pow(voltage,2.0)+2.332691*voltage-10.885;
+	double param1 = -B/(2.0*A);
+	double param2 = 1.0/A;
+	double param3 = (pow(B,2.0)-4*A*C)/(4*pow(A,2.0));
+	//Force=A*pwm^2+B*pwm+C
 	if(param2*F+param3>0){
 		pwm = param1 + sqrt(param2 * F + param3);
 	}
@@ -897,7 +898,7 @@ void imu_Callback(const sensor_msgs::Imu& msg){
 
     	// TP attitude - Euler representation
     	tf::Matrix3x3(quat).getRPY(imu_rpy.x,imu_rpy.y,imu_rpy.z);
-	base_yaw = cam_att(2)+pi/4;
+	base_yaw = cam_att(2);
     	if(base_yaw - yaw_prev < -pi) yaw_rotate_count++;
 	else if(base_yaw - yaw_prev > pi) yaw_rotate_count--;
 	yaw_now = base_yaw+2*pi*yaw_rotate_count;
@@ -977,8 +978,8 @@ void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg){
 	tf::quaternionMsgToTF(rot,quat);
 	tf::Matrix3x3(quat).getRPY(cam_att(0),cam_att(1),cam_att(2));
 	cam_v << t265_lin_vel.x, t265_lin_vel.y, t265_lin_vel.z;
-	R_v << cos(pi/4.), -sin(pi/4.),  0.,
- 	       sin(pi/4.),  cos(pi/4.),  0.,
+	R_v << cos(pi/2.), -sin(pi/2.),  0.,
+ 	       sin(pi/2.),  cos(pi/2.),  0.,
 	                0.,           0.,  1.;
 
 	v = R_v*cam_v;
@@ -987,9 +988,9 @@ void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg){
 	double global_Y_dot = v(1)*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))-v(2)*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))+v(0)*cos(imu_rpy.y)*sin(imu_rpy.z);
 	double global_Z_dot = -v(0)*sin(imu_rpy.y)+v(2)*cos(imu_rpy.x)*cos(imu_rpy.y)+v(1)*cos(imu_rpy.y)*sin(imu_rpy.x);
 
-	lin_vel.x=global_X_dot;
-	lin_vel.y=global_Y_dot;
-	lin_vel.z=global_Z_dot;
+	lin_vel.x=v(0);//global_X_dot;
+	lin_vel.y=v(1);//global_Y_dot;
+	lin_vel.z=v(2);//global_Z_dot;
 	//ROS_INFO("Attitude - [r: %f  p: %f  y:%f]",cam_att(0),cam_att(1),cam_att(2));
 	//ROS_INFO("Linear_velocity - [x: %f  y: %f  z:%f]",v(0),v(1),v(2));
 	//ROS_INFO("Angular_velocity - [x: %f  y: %f  z:%f]",w(0),w(1),w(2));
