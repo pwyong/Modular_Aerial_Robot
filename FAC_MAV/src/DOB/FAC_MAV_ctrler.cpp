@@ -1,5 +1,7 @@
 //2022.05.16 Coaxial-Octorotor version
 //2022.06.23 Ground Station Application
+//2022.08.XX DOB (Disturbance Observer) Application
+//2022.09.05 ESC (Extremum Seeking Control) Application
 
 #include <ros/ros.h>
 #include <iostream>
@@ -264,6 +266,7 @@ double y_dot_r1=0;
 double y_dot_r2=0;
 double y_dot_r3=0;
 
+double dhat_r = 0;
 double tautilde_r_d=0;
 
 //Pitch DOB
@@ -281,6 +284,7 @@ double y_dot_p1=0;
 double y_dot_p2=0;
 double y_dot_p3=0;
 
+double dhat_p=0;
 double tautilde_p_d=0;
 
 //Yaw DOB
@@ -328,7 +332,7 @@ void pwm_Arm();
 void pwm_Calibration();
 void kalman_Filtering();
 void pid_Gain_Setting();
-void dob();
+void disturbance_Observer();
 //-------------------------------------------------------
 
 //Publisher Group--------------------------------------
@@ -811,13 +815,15 @@ void rpyT_ctrl() {
 	//--------------------------------------------------------
 
 	//DOB-----------------------------------------------------
-		dob();
+		disturbance_Observer();
 	//--------------------------------------------------------
+	tautilde_r_d = tau_r_d - dhat_r;
+	tautilde_p_d = tau_p_d - dhat_p;
 	F_xd += sin(pass_freq2*time_count);
 	F_yd += sin(pass_freq2*time_count);
 	F_zd += sin(pass_freq1*time_count);
 	//u << tau_r_d, tau_p_d, tau_y_d, F_zd;
-	u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_zd;
+	u << tautilde_r_d, tautilde_p_d, tau_y_d, F_zd;
 	torque_d.x = tautilde_r_d;
 	torque_d.y = tautilde_p_d;
 	torque_d.z = tau_y_d;
@@ -1189,7 +1195,7 @@ void pid_Gain_Setting(){
 	//ROS_INFO("%.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf ",Pa, Ia, Da, Py, Dy, Pz, Iz, Dz, Pp, Ip, Dp);
 }
 
-void dob(){
+void disturbance_Observer(){
 	//DOB------------------------------------------------------------------------------
 	//Nominal transfer function : q/tau = 1/Js^2    Q - 3rd order butterworth filter
 	//Roll
@@ -1211,9 +1217,8 @@ void dob(){
 	y_r3 += y_dot_r3*delta_t.count();
 	double Qtautilde_r = pow(fq_cutoff,3)*y_r3;
 
-	double dhat_r = tauhat_r - Qtautilde_r;
+	dhat_r = tauhat_r - Qtautilde_r;
 
-	tautilde_r_d = tau_r_d - dhat_r;
 
 	//Pitch
 	//Q*(Js^2) transfer function to state space 
@@ -1234,9 +1239,8 @@ void dob(){
 	y_p3 += y_dot_p3*delta_t.count();
 	double Qtautilde_p = pow(fq_cutoff,3)*y_p3;
 
-	double dhat_p = tauhat_p - Qtautilde_p;
+	dhat_p = tauhat_p - Qtautilde_p;
 
-	tautilde_p_d = tau_p_d - dhat_p;
 
 	//Yaw
 	//Q*(Js^2) transfer function to state space 
