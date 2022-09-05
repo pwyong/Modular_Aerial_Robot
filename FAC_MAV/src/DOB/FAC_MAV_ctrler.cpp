@@ -813,7 +813,9 @@ void rpyT_ctrl() {
 	//DOB-----------------------------------------------------
 		dob();
 	//--------------------------------------------------------
-
+	F_xd += sin(pass_freq2*time_count);
+	F_yd += sin(pass_freq2*time_count);
+	F_zd += sin(pass_freq1*time_count);
 	//u << tau_r_d, tau_p_d, tau_y_d, F_zd;
 	u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_zd;
 	torque_d.x = tautilde_r_d;
