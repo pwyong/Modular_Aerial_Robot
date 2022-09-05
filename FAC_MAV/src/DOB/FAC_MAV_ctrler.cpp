@@ -71,7 +71,6 @@ geometry_msgs::Vector3 torque_d;
 geometry_msgs::Vector3 force_d;
 std_msgs::Float32MultiArray force_cmd;
 geometry_msgs::Vector3 desired_lin_vel;
-
 geometry_msgs::Vector3 t265_att;
 geometry_msgs::Vector3 filtered_angular_rate;
 std_msgs::Float32 altitude_d;
@@ -179,9 +178,9 @@ static double hardware_servo_limit=0.3;
 static double servo_command_limit = 0.2;
 static double tau_y_limit = 0.3;
 
-double x_c=0.0;
-double y_c=0.0;
-double z_c=0.0;
+double x_c_hat=0.0;
+double y_c_hat=0.0;
+double z_c_hat=0.0;
 //--------------------------------------------------------
 
 //Control gains===========================================
@@ -329,6 +328,7 @@ void pwm_Arm();
 void pwm_Calibration();
 void kalman_Filtering();
 void pid_Gain_Setting();
+void dob();
 //-------------------------------------------------------
 
 //Publisher Group--------------------------------------
@@ -350,6 +350,7 @@ ros::Publisher battery_voltage;
 ros::Publisher force_command;
 ros::Publisher delta_time;
 ros::Publisher desired_velocity;
+ros::Publisher Center_of_Mass;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
@@ -387,8 +388,53 @@ Eigen::MatrixXd covariance_term;
 geometry_msgs::Vector3 filtered_Angular_vel;
 geometry_msgs::Vector3 filtered_Angular_accel;
 //-----------------------------------------------------
+
+//Timer------------------------------------------------
 auto end  =std::chrono::high_resolution_clock::now();
 auto start=std::chrono::high_resolution_clock::now();
+//-----------------------------------------------------
+
+//Extremum Seeking Control-----------------------------
+geometry_msgs::Vector3 prev_angular_Vel;
+geometry_msgs::Vector3 angular_Accel;
+geometry_msgs::Vector3 CoM;
+
+double MoI_x_hat = 0.02;
+double MoI_y_hat = 0.02;
+double G = 10;
+
+double bias_x_c = 0;
+double bias_y_c = 0;
+double bias_z_c = 0;
+
+//Bandpass filter parameter
+double Q_factor=10;
+double pass_freq1=20;
+double pass_freq2=10;
+
+//Filter1
+double x_11=0;
+double x_12=0;
+double x_dot_11=0;
+double x_dot_12=0;
+double y_11=0;
+
+//Filter2
+double x_21=0;
+double x_22=0;
+double x_dot_21=0;
+double x_dot_22=0;
+double y_21=0;
+
+//Filter3
+double x_31=0;
+double x_32=0;
+double x_dot_31=0;
+double x_dot_32=0;
+double y_31=0;
+
+double time_count = 0;
+//-----------------------------------------------------
 
 int main(int argc, char **argv){
 	
@@ -407,9 +453,12 @@ int main(int argc, char **argv){
 		pos_integ_limit=nh.param<double>("position_integ_limit",10);
 
 		//Center of Mass
-		x_c=nh.param<double>("x_center_of_mass",0.0);
-		y_c=nh.param<double>("y_center_of_mass",0.0);
-		z_c=nh.param<double>("z_center_of_mass",0.0);
+		x_c_hat=nh.param<double>("x_center_of_mass",0.0);
+		y_c_hat=nh.param<double>("y_center_of_mass",0.0);
+		z_c_hat=nh.param<double>("z_center_of_mass",0.0);
+		CoM.x = x_c_hat;
+		CoM.y = y_c_hat;
+		CoM.z = z_c_hat;
 
 		//Conventional Flight Mode Control Gains
 			//Roll, Pitch PID gains
@@ -466,8 +515,6 @@ int main(int argc, char **argv){
 	//Kalman initialization-------------------------------------
 		x << 0, 0, 0, 0, 0, 0;
 		P << Eigen::MatrixXd::Identity(6,6);
-		F << Eigen::MatrixXd::Identity(3,3), 0.005*Eigen::MatrixXd::Identity(3,3),
-		     Eigen::MatrixXd::Zero(3,3), Eigen::MatrixXd::Identity(3,3);
 		H << Eigen::MatrixXd::Identity(3,3), Eigen::MatrixXd::Zero(3,3);
 		Q << Eigen::MatrixXd::Identity(3,3), Eigen::MatrixXd::Zero(3,3),
 		     Eigen::MatrixXd::Zero(3,3), 100.*Eigen::MatrixXd::Identity(3,3);
@@ -495,6 +542,7 @@ int main(int argc, char **argv){
 	force_command = nh.advertise<std_msgs::Float32MultiArray>("force_cmd",100);
 	delta_time = nh.advertise<std_msgs::Float32>("delta_t",100);
 	desired_velocity = nh.advertise<geometry_msgs::Vector3>("lin_vel_d",100);
+	Center_of_Mass = nh.advertise<geometry_msgs::Vector3>("Center_of_Mass",100);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -515,7 +563,8 @@ void publisherSet(){
 	delta_t=end-start; 
 	dt.data=delta_t.count();
 	start=std::chrono::high_resolution_clock::now();
-
+	// F << Eigen::MatrixXd::Identity(3,3), delta_t.count()*Eigen::MatrixXd::Identity(3,3),
+	// 	     Eigen::MatrixXd::Zero(3,3),                 Eigen::MatrixXd::Identity(3,3);
 	setCM();
 
 	if(Sbus[6]<=1500){
@@ -560,7 +609,7 @@ void publisherSet(){
 	}
 	
 	//pwm_Calibration();
-	kalman_Filtering();	
+	//kalman_Filtering();	
 	angle_d.x=r_d;
 	angle_d.y=p_d;
 	angle_d.z=y_d;
@@ -572,6 +621,9 @@ void publisherSet(){
 	Force.data[1] = F2;
 	Force.data[2] = F3;
 	Force.data[3] = F4;
+	CoM.x = x_c_hat;
+	CoM.y = y_c_hat;
+	CoM.z = z_c_hat;
 	PWMs.publish(PWMs_cmd);
 	euler.publish(imu_rpy);
 	desired_angle.publish(angle_d);
@@ -589,14 +641,15 @@ void publisherSet(){
 	force_command.publish(force_cmd);
 	delta_time.publish(dt);
 	desired_velocity.publish(desired_lin_vel);
+	Center_of_Mass.publish(CoM);
 }
 
 void setCM(){
 	//Co-rotating type
-	CM <<              (l_servo+z_c)*sin(theta1)+y_c*cos(theta1),  (r_arm+y_c)*cos(theta2)+b_over_k_ratio*sin(theta2),           (l_servo+z_c)*sin(theta1)+y_c*cos(theta1), -(r_arm-y_c)*cos(theta2)+b_over_k_ratio*sin(theta2),
-              (r_arm-x_c)*cos(theta1)+b_over_k_ratio*sin(theta1),          (-l_servo+z_c)*sin(theta2)-x_c*cos(theta2), -(r_arm+x_c)*cos(theta1)+b_over_k_ratio*sin(theta1),          (-l_servo+z_c)*sin(theta2)-x_c*cos(theta2),
-              (r_arm-x_c)*sin(theta1)-b_over_k_ratio*cos(theta1), -(r_arm+y_c)*sin(theta2)+b_over_k_ratio*cos(theta2), -(r_arm+x_c)*sin(theta1)-b_over_k_ratio*cos(theta1),  (r_arm-y_c)*sin(theta2)+b_over_k_ratio*cos(theta2),
-                                                    -cos(theta1),                                        -cos(theta2),                                        -cos(theta1),                                        -cos(theta2);
+	CM <<          (l_servo+z_c_hat)*sin(theta1)+y_c_hat*cos(theta1),  (r_arm+y_c_hat)*cos(theta2)+b_over_k_ratio*sin(theta2),       (l_servo+z_c_hat)*sin(theta1)+y_c_hat*cos(theta1), -(r_arm-y_c_hat)*cos(theta2)+b_over_k_ratio*sin(theta2),
+              (r_arm-x_c_hat)*cos(theta1)+b_over_k_ratio*sin(theta1),      (-l_servo+z_c_hat)*sin(theta2)-x_c_hat*cos(theta2), -(r_arm+x_c_hat)*cos(theta1)+b_over_k_ratio*sin(theta1),      (-l_servo+z_c_hat)*sin(theta2)-x_c_hat*cos(theta2),
+              (r_arm-x_c_hat)*sin(theta1)-b_over_k_ratio*cos(theta1), -(r_arm+y_c_hat)*sin(theta2)+b_over_k_ratio*cos(theta2), -(r_arm+x_c_hat)*sin(theta1)-b_over_k_ratio*cos(theta1),  (r_arm-y_c_hat)*sin(theta2)+b_over_k_ratio*cos(theta2),
+                                                        -cos(theta1),                                            -cos(theta2),                                            -cos(theta1),                                            -cos(theta2);
     	invCM = CM.inverse();
 }
 
@@ -617,7 +670,12 @@ void rpyT_ctrl() {
 	double e_Z = 0;
 	double e_X_dot = 0;
 	double e_Y_dot = 0;
-	//double delta_z=pos.z-prev_z;
+	
+	angular_Accel.x = (imu_ang_vel.x-prev_angular_Vel.x)/delta_t.count();
+	angular_Accel.y = (imu_ang_vel.y-prev_angular_Vel.y)/delta_t.count();
+	angular_Accel.z = (imu_ang_vel.z-prev_angular_Vel.z)/delta_t.count();
+
+
 		
     double global_X_ddot = imu_lin_acc.z*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.y*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.z)*cos(imu_rpy.y);
 	double global_Y_ddot = imu_lin_acc.y*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.z*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.y)*sin(imu_rpy.z);
@@ -706,89 +764,10 @@ void rpyT_ctrl() {
 	tau_p_d = Pa * e_p + Ia * e_p_i + Da * (-imu_ang_vel.y);//+ (double)0.18; 
 	tau_y_d = Py * e_y + Dy * (-imu_ang_vel.z);
 	if(fabs(tau_y_d) > tau_y_limit) tau_y_d = tau_y_d/fabs(tau_y_d)*tau_y_limit;
-
-	//DOB------------------------------------------------------------------------------
-	//Nominal transfer function : q/tau = 1/Js^2    Q - 3rd order butterworth filter
-	//Roll
-	//Q*(Js^2) transfer function to state space 
-	x_dot_r1 = -2*fq_cutoff*x_r1-2*pow(fq_cutoff,2)*x_r2-pow(fq_cutoff,3)*x_r3+imu_rpy.x;
-	x_dot_r2 = x_r1;
-	x_dot_r3 = x_r2;
-    x_r1 += x_dot_r1*delta_t.count(); 
-	x_r2 += x_dot_r2*delta_t.count(); 
-	x_r3 += x_dot_r3*delta_t.count(); 
-	double tauhat_r = J_x*pow(fq_cutoff,3)*x_r1;
-
-	//Q transfer function to state space
-	y_dot_r1 = -2*fq_cutoff*y_r1-2*pow(fq_cutoff,2)*y_r2-pow(fq_cutoff,3)*y_r3+tautilde_r_d;
-	y_dot_r2 = y_r1;
-	y_dot_r3 = y_r2;
-	y_r1 += y_dot_r1*delta_t.count();
-	y_r2 += y_dot_r2*delta_t.count();
-	y_r3 += y_dot_r3*delta_t.count();
-	double Qtautilde_r = pow(fq_cutoff,3)*y_r3;
-
-	double dhat_r = tauhat_r - Qtautilde_r;
-
-	tautilde_r_d = tau_r_d - dhat_r;
-
-	//Pitch
-	//Q*(Js^2) transfer function to state space 
-	x_dot_p1 = -2*fq_cutoff*x_p1-2*pow(fq_cutoff,2)*x_p2-pow(fq_cutoff,3)*x_p3+imu_rpy.y;
-	x_dot_p2 = x_p1;
-	x_dot_p3 = x_p2;
-	x_p1 += x_dot_p1*delta_t.count(); 
-	x_p2 += x_dot_p2*delta_t.count(); 
-	x_p3 += x_dot_p3*delta_t.count(); 
-	double tauhat_p = J_y*pow(fq_cutoff,3)*x_p1;
-
-	//Q transfer function to state space
-	y_dot_p1 = -2*fq_cutoff*y_p1-2*pow(fq_cutoff,2)*y_p2-pow(fq_cutoff,3)*y_p3+tautilde_p_d;
-	y_dot_p2 = y_p1;
-	y_dot_p3 = y_p2;
-	y_p1 += y_dot_p1*delta_t.count();
-	y_p2 += y_dot_p2*delta_t.count();
-	y_p3 += y_dot_p3*delta_t.count();
-	double Qtautilde_p = pow(fq_cutoff,3)*y_p3;
-
-	double dhat_p = tauhat_p - Qtautilde_p;
-
-	tautilde_p_d = tau_p_d - dhat_p;
-
-	//Yaw
-	//Q*(Js^2) transfer function to state space 
-	x_dot_y1 = -2*fq_cutoff*x_y1-2*pow(fq_cutoff,2)*x_y2-pow(fq_cutoff,3)*x_y3+imu_rpy.z;
-	x_dot_y2 = x_y1;
-	x_dot_y3 = x_y2;
-    x_y1 += x_dot_y1*delta_t.count(); 
-	x_y2 += x_dot_y2*delta_t.count(); 
-	x_y3 += x_dot_y3*delta_t.count(); 
-	double tauhat_y = J_z*pow(fq_cutoff,3)*x_y1;
-
-	//Q transfer function to state space
-	y_dot_y1 = -2*fq_cutoff*y_y1-2*pow(fq_cutoff,2)*y_y2-pow(fq_cutoff,3)*y_y3+tautilde_y_d;
-	y_dot_y2 = y_y1;
-	y_dot_y3 = y_y2;
-	y_y1 += y_dot_y1*delta_t.count();
-	y_y2 += y_dot_y2*delta_t.count();
-	y_y3 += y_dot_y3*delta_t.count();
-	double Qtautilde_y = pow(fq_cutoff,3)*y_y3;
-
-	double dhat_y = tauhat_y - Qtautilde_y;
-
-	//tautilde_y_d = tau_y_d - dhat_y;
-    	tautilde_y_d = tau_y_d;
-	//--------------------------------------------------------------------------------------
+	
 	if(Sbus[5]>1500){
 		Z_ddot_d = Pz * e_Z + Iz * e_Z_i - Dz * lin_vel.z;
-		desired_lin_vel.z = Z_ddot_d;
-		//if(fabs(Z_dot_d) > XYZ_dot_limit) Z_dot_d = (Z_dot_d/fabs(Z_dot_d))*XYZ_dot_limit;
-		//double e_Z_dot = Z_dot_d - lin_vel.z;
-		//e_Z_dot_i += e_Z_dot * delta_t.count();
-		//if (fabs(e_Z_dot_i) > vel_integ_limit) e_Z_dot_i = (e_Z_dot_i / fabs(e_Z_dot_i)) * vel_integ_limit;
-		//Z_ddot_d = Pv * e_Z_dot + Iv * e_Z_dot_i - Dv * global_Z_ddot;
-		//if(fabs(Z_ddot_d) > XYZ_ddot_limit) Z_ddot_d = (Z_ddot_d/fabs(Z_ddot_d))*XYZ_ddot_limit;
-		// ROS_INFO("Altitude Control!!");
+		desired_lin_vel.z = Z_ddot_d; // But this is desired acceleration
 		if(Sbus[6]>1500) F_zd = mass*(X_ddot_d*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-Y_ddot_d*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.y)*sin(imu_rpy.z))+(Z_ddot_d-g)*cos(imu_rpy.x)*cos(imu_rpy.y));
 		else F_zd = mass*(Z_ddot_d-g);
 	}
@@ -801,6 +780,40 @@ void rpyT_ctrl() {
 	if(F_zd > -0.5*mass*g) F_zd = -0.5*mass*g;
 	if(F_zd < -1.5*mass*g) F_zd = -1.5*mass*g;
 
+	//ESC-----------------------------------------------------
+		x_dot_11 = -pass_freq1/Q_factor*x_11-pow(pass_freq1,2.0)*x_12+MoI_y_hat*angular_Accel.y;
+		x_dot_12 = x_11;
+		x_11 += x_dot_11*delta_t.count();
+		x_12 += x_dot_12*delta_t.count();
+		y_11 = pass_freq1/Q_factor*x_11;
+		double gradient_bias_x_c = sin(pass_freq1*time_count)*y_11;
+		bias_x_c += -10.0*gradient_bias_x_c;
+		x_c_hat += bias_x_c;
+
+		x_dot_21 = -pass_freq1/Q_factor*x_21-pow(pass_freq1,2.0)*x_22+MoI_x_hat*angular_Accel.x;
+		x_dot_22 = x_21;
+		x_21 += x_dot_21*delta_t.count();
+		x_22 += x_dot_22*delta_t.count();
+		y_21 = pass_freq1/Q_factor*x_21;
+		double gradient_bias_y_c = sin(pass_freq1*time_count)*y_21;
+		bias_y_c += 10.0*gradient_bias_y_c;
+		y_c_hat += bias_y_c;
+
+		x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
+		x_dot_32 = x_31;
+		x_31 += x_dot_31*delta_t.count();
+		x_32 += x_dot_32*delta_t.count();
+		y_31 = pass_freq2/Q_factor*x_31;
+		double gradient_bias_z_c = sin(pass_freq2*time_count)*y_31;
+		bias_z_c += -10.0*gradient_bias_z_c;
+		z_c_hat += bias_z_c;
+
+	//--------------------------------------------------------
+
+	//DOB-----------------------------------------------------
+		dob();
+	//--------------------------------------------------------
+
 	//u << tau_r_d, tau_p_d, tau_y_d, F_zd;
 	u << tautilde_r_d, tautilde_p_d, tautilde_y_d, F_zd;
 	torque_d.x = tautilde_r_d;
@@ -809,12 +822,11 @@ void rpyT_ctrl() {
 	force_d.x = F_xd;
 	force_d.y = F_yd;
 	force_d.z = F_zd;
-	//ROS_INFO("xvel:%lf, yvel:%lf, zvel:%lf", imu_ang_vel.x, imu_ang_vel.y, imu_ang_vel.z);
-	// ROS_INFO("tr:%lf, tp:%lf, ty:%lf, Thrust_d:%lf", tau_r_d, tau_p_d, tau_y_d, Thrust_d);
-	// ROS_INFO("%f",Dz*freq*delta_z);
+
+	prev_angular_Vel = imu_ang_vel;
+	time_count += delta_t.count();
 	ud_to_PWMs(tau_r_d, tau_p_d, tau_y_d, Thrust_d);
 	//ud_to_PWMs(tautilde_r_d, tautilde_p_d, tautilde_y_d, Thrust_d);
-	//ROS_INFO("F_zd : %lf",F_zd);
 }
 
  
@@ -1174,3 +1186,79 @@ void pid_Gain_Setting(){
 	}
 	//ROS_INFO("%.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf / %.2lf ",Pa, Ia, Da, Py, Dy, Pz, Iz, Dz, Pp, Ip, Dp);
 }
+
+void dob(){
+	//DOB------------------------------------------------------------------------------
+	//Nominal transfer function : q/tau = 1/Js^2    Q - 3rd order butterworth filter
+	//Roll
+	//Q*(Js^2) transfer function to state space 
+	x_dot_r1 = -2*fq_cutoff*x_r1-2*pow(fq_cutoff,2)*x_r2-pow(fq_cutoff,3)*x_r3+imu_rpy.x;
+	x_dot_r2 = x_r1;
+	x_dot_r3 = x_r2;
+    x_r1 += x_dot_r1*delta_t.count(); 
+	x_r2 += x_dot_r2*delta_t.count(); 
+	x_r3 += x_dot_r3*delta_t.count(); 
+	double tauhat_r = J_x*pow(fq_cutoff,3)*x_r1;
+
+	//Q transfer function to state space
+	y_dot_r1 = -2*fq_cutoff*y_r1-2*pow(fq_cutoff,2)*y_r2-pow(fq_cutoff,3)*y_r3+tautilde_r_d;
+	y_dot_r2 = y_r1;
+	y_dot_r3 = y_r2;
+	y_r1 += y_dot_r1*delta_t.count();
+	y_r2 += y_dot_r2*delta_t.count();
+	y_r3 += y_dot_r3*delta_t.count();
+	double Qtautilde_r = pow(fq_cutoff,3)*y_r3;
+
+	double dhat_r = tauhat_r - Qtautilde_r;
+
+	tautilde_r_d = tau_r_d - dhat_r;
+
+	//Pitch
+	//Q*(Js^2) transfer function to state space 
+	x_dot_p1 = -2*fq_cutoff*x_p1-2*pow(fq_cutoff,2)*x_p2-pow(fq_cutoff,3)*x_p3+imu_rpy.y;
+	x_dot_p2 = x_p1;
+	x_dot_p3 = x_p2;
+	x_p1 += x_dot_p1*delta_t.count(); 
+	x_p2 += x_dot_p2*delta_t.count(); 
+	x_p3 += x_dot_p3*delta_t.count(); 
+	double tauhat_p = J_y*pow(fq_cutoff,3)*x_p1;
+
+	//Q transfer function to state space
+	y_dot_p1 = -2*fq_cutoff*y_p1-2*pow(fq_cutoff,2)*y_p2-pow(fq_cutoff,3)*y_p3+tautilde_p_d;
+	y_dot_p2 = y_p1;
+	y_dot_p3 = y_p2;
+	y_p1 += y_dot_p1*delta_t.count();
+	y_p2 += y_dot_p2*delta_t.count();
+	y_p3 += y_dot_p3*delta_t.count();
+	double Qtautilde_p = pow(fq_cutoff,3)*y_p3;
+
+	double dhat_p = tauhat_p - Qtautilde_p;
+
+	tautilde_p_d = tau_p_d - dhat_p;
+
+	//Yaw
+	//Q*(Js^2) transfer function to state space 
+	x_dot_y1 = -2*fq_cutoff*x_y1-2*pow(fq_cutoff,2)*x_y2-pow(fq_cutoff,3)*x_y3+imu_rpy.z;
+	x_dot_y2 = x_y1;
+	x_dot_y3 = x_y2;
+    x_y1 += x_dot_y1*delta_t.count(); 
+	x_y2 += x_dot_y2*delta_t.count(); 
+	x_y3 += x_dot_y3*delta_t.count(); 
+	double tauhat_y = J_z*pow(fq_cutoff,3)*x_y1;
+
+	//Q transfer function to state space
+	y_dot_y1 = -2*fq_cutoff*y_y1-2*pow(fq_cutoff,2)*y_y2-pow(fq_cutoff,3)*y_y3+tautilde_y_d;
+	y_dot_y2 = y_y1;
+	y_dot_y3 = y_y2;
+	y_y1 += y_dot_y1*delta_t.count();
+	y_y2 += y_dot_y2*delta_t.count();
+	y_y3 += y_dot_y3*delta_t.count();
+	double Qtautilde_y = pow(fq_cutoff,3)*y_y3;
+
+	double dhat_y = tauhat_y - Qtautilde_y;
+
+	//tautilde_y_d = tau_y_d - dhat_y;
+    tautilde_y_d = tau_y_d;
+	//--------------------------------------------------------------------------------------
+}
+
