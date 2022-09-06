@@ -603,7 +603,6 @@ void publisherSet(){
 		start_flag=false;
 		theta1_command=0.0;
 		theta2_command=0.0;
-		time_count=0.0;
 		pwm_Kill();	
 	}
 	else{
