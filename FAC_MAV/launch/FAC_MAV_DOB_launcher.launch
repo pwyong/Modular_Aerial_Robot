@@ -52,9 +52,9 @@
 	<param name="position_integ_limit"	value="10.0"/>
 
 	<!--Center of mass-->
-	<param name="x_center_of_mass"		value="-0.002"/>	
-	<param name="y_center_of_mass"		value="0.011"/>	
-	<param name="z_center_of_mass"		value="-0.044"/>	
+	<param name="x_center_of_mass"		value="0.0"/>	
+	<param name="y_center_of_mass"		value="0.0"/>	
+	<param name="z_center_of_mass"		value="0.0"/>	
 
 	<!--Conventional flight mode-->
     		<!--Conventional Mode attitude_rp gains-->
