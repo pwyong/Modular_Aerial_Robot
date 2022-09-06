@@ -333,6 +333,7 @@ void pwm_Calibration();
 void kalman_Filtering();
 void pid_Gain_Setting();
 void disturbance_Observer();
+void sine_wave_vibration();
 //-------------------------------------------------------
 
 //Publisher Group--------------------------------------
@@ -437,7 +438,9 @@ double x_dot_31=0;
 double x_dot_32=0;
 double y_31=0;
 
-double time_count = 0;
+double vibration1=0;
+double vibration2=0;
+double time_count=0;
 //-----------------------------------------------------
 
 int main(int argc, char **argv){
@@ -569,6 +572,7 @@ void publisherSet(){
 	start=std::chrono::high_resolution_clock::now();
 	// F << Eigen::MatrixXd::Identity(3,3), delta_t.count()*Eigen::MatrixXd::Identity(3,3),
 	// 	     Eigen::MatrixXd::Zero(3,3),                 Eigen::MatrixXd::Identity(3,3);
+	sine_wave_vibration();
 	setCM();
 
 	if(Sbus[6]<=1500){
@@ -784,14 +788,18 @@ void rpyT_ctrl() {
 	if(F_zd > -0.5*mass*g) F_zd = -0.5*mass*g;
 	if(F_zd < -1.5*mass*g) F_zd = -1.5*mass*g;
 
+	F_xd = F_xd + vibration2;
+	F_yd = F_yd + vibration2;
+	F_zd = F_zd + vibration1;
+	
 	//ESC-----------------------------------------------------
 		x_dot_11 = -pass_freq1/Q_factor*x_11-pow(pass_freq1,2.0)*x_12+MoI_y_hat*angular_Accel.y;
 		x_dot_12 = x_11;
 		x_11 += x_dot_11*delta_t.count();
 		x_12 += x_dot_12*delta_t.count();
 		y_11 = pass_freq1/Q_factor*x_11;
-		double gradient_bias_x_c = sin(pass_freq1*time_count)*y_11;
-		bias_x_c += -10.0*gradient_bias_x_c;
+		double gradient_bias_x_c = vibration1*y_11;
+		bias_x_c += -10.0*gradient_bias_x_c*delta_t.count();;
 		x_c_hat += bias_x_c;
 
 		x_dot_21 = -pass_freq1/Q_factor*x_21-pow(pass_freq1,2.0)*x_22+MoI_x_hat*angular_Accel.x;
@@ -799,8 +807,8 @@ void rpyT_ctrl() {
 		x_21 += x_dot_21*delta_t.count();
 		x_22 += x_dot_22*delta_t.count();
 		y_21 = pass_freq1/Q_factor*x_21;
-		double gradient_bias_y_c = sin(pass_freq1*time_count)*y_21;
-		bias_y_c += 10.0*gradient_bias_y_c;
+		double gradient_bias_y_c =vibration1*y_21;
+		bias_y_c += 10.0*gradient_bias_y_c*delta_t.count();;
 		y_c_hat += bias_y_c;
 
 		x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
@@ -808,8 +816,8 @@ void rpyT_ctrl() {
 		x_31 += x_dot_31*delta_t.count();
 		x_32 += x_dot_32*delta_t.count();
 		y_31 = pass_freq2/Q_factor*x_31;
-		double gradient_bias_z_c = sin(pass_freq2*time_count)*y_31;
-		bias_z_c += -10.0*gradient_bias_z_c;
+		double gradient_bias_z_c = vibration2*y_31;
+		bias_z_c += -10.0*gradient_bias_z_c*delta_t.count();;
 		z_c_hat += bias_z_c;
 
 	//--------------------------------------------------------
@@ -819,9 +827,6 @@ void rpyT_ctrl() {
 	//--------------------------------------------------------
 	tautilde_r_d = tau_r_d - dhat_r;
 	tautilde_p_d = tau_p_d - dhat_p;
-	F_xd += sin(pass_freq2*time_count);
-	F_yd += sin(pass_freq2*time_count);
-	F_zd += sin(pass_freq1*time_count);
 	//u << tau_r_d, tau_p_d, tau_y_d, F_zd;
 	u << tautilde_r_d, tautilde_p_d, tau_y_d, F_zd;
 	torque_d.x = tautilde_r_d;
@@ -832,7 +837,6 @@ void rpyT_ctrl() {
 	force_d.z = F_zd;
 
 	prev_angular_Vel = imu_ang_vel;
-	time_count += delta_t.count();
 	ud_to_PWMs(tau_r_d, tau_p_d, tau_y_d, Thrust_d);
 	//ud_to_PWMs(tautilde_r_d, tautilde_p_d, tautilde_y_d, Thrust_d);
 }
@@ -1268,3 +1272,8 @@ void disturbance_Observer(){
 	//--------------------------------------------------------------------------------------
 }
 
+void sine_wave_vibration(){
+	vibration1 = sin(pass_freq1*time_count);
+	vibration2 = sin(pass_freq2*time_count);
+	time_count += delta_t.count();
+}
