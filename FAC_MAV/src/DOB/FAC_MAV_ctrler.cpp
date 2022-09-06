@@ -356,6 +356,7 @@ ros::Publisher force_command;
 ros::Publisher delta_time;
 ros::Publisher desired_velocity;
 ros::Publisher Center_of_Mass;
+ros::Publisher sine_wave_Data;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
@@ -403,17 +404,18 @@ auto start=std::chrono::high_resolution_clock::now();
 geometry_msgs::Vector3 prev_angular_Vel;
 geometry_msgs::Vector3 angular_Accel;
 geometry_msgs::Vector3 CoM;
+geometry_msgs::Vector3 sine_wave;
 
 double MoI_x_hat = 0.02;
 double MoI_y_hat = 0.02;
-double G = 10;
+double G = 1;
 
 double bias_x_c = 0;
 double bias_y_c = 0;
 double bias_z_c = 0;
 
 //Bandpass filter parameter
-double Q_factor=10;
+double Q_factor=5;
 double pass_freq1=20;
 double pass_freq2=10;
 
@@ -550,6 +552,7 @@ int main(int argc, char **argv){
 	delta_time = nh.advertise<std_msgs::Float32>("delta_t",100);
 	desired_velocity = nh.advertise<geometry_msgs::Vector3>("lin_vel_d",100);
 	Center_of_Mass = nh.advertise<geometry_msgs::Vector3>("Center_of_Mass",100);
+	sine_wave_Data = nh.advertise<geometry_msgs::Vector3>("sine_wave",100);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -600,6 +603,7 @@ void publisherSet(){
 		start_flag=false;
 		theta1_command=0.0;
 		theta2_command=0.0;
+		time_count=0.0;
 		pwm_Kill();	
 	}
 	else{
@@ -650,6 +654,7 @@ void publisherSet(){
 	delta_time.publish(dt);
 	desired_velocity.publish(desired_lin_vel);
 	Center_of_Mass.publish(CoM);
+	sine_wave_Data.publish(sine_wave);
 }
 
 void setCM(){
@@ -688,6 +693,7 @@ void rpyT_ctrl() {
     double global_X_ddot = imu_lin_acc.z*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.y*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.z)*cos(imu_rpy.y);
 	double global_Y_ddot = imu_lin_acc.y*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.z*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.y)*sin(imu_rpy.z);
 	double global_Z_ddot = g-imu_lin_acc.x*sin(imu_rpy.y)+imu_lin_acc.z*cos(imu_rpy.x)*cos(imu_rpy.y)+imu_lin_acc.y*cos(imu_rpy.y)*sin(imu_rpy.x);
+	//ROS_INFO("%lf",time_count);
 
 	if(Sbus[6]>1500){
 		X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
@@ -799,7 +805,7 @@ void rpyT_ctrl() {
 		x_12 += x_dot_12*delta_t.count();
 		y_11 = pass_freq1/Q_factor*x_11;
 		double gradient_bias_x_c = vibration1*y_11;
-		bias_x_c += -10.0*gradient_bias_x_c*delta_t.count();;
+		bias_x_c += -G*gradient_bias_x_c*delta_t.count();;
 		x_c_hat += bias_x_c;
 
 		x_dot_21 = -pass_freq1/Q_factor*x_21-pow(pass_freq1,2.0)*x_22+MoI_x_hat*angular_Accel.x;
@@ -808,7 +814,7 @@ void rpyT_ctrl() {
 		x_22 += x_dot_22*delta_t.count();
 		y_21 = pass_freq1/Q_factor*x_21;
 		double gradient_bias_y_c =vibration1*y_21;
-		bias_y_c += 10.0*gradient_bias_y_c*delta_t.count();;
+		bias_y_c += G*gradient_bias_y_c*delta_t.count();;
 		y_c_hat += bias_y_c;
 
 		x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
@@ -817,7 +823,7 @@ void rpyT_ctrl() {
 		x_32 += x_dot_32*delta_t.count();
 		y_31 = pass_freq2/Q_factor*x_31;
 		double gradient_bias_z_c = vibration2*y_31;
-		bias_z_c += -10.0*gradient_bias_z_c*delta_t.count();;
+		bias_z_c += -G*gradient_bias_z_c*delta_t.count();;
 		z_c_hat += bias_z_c;
 
 	//--------------------------------------------------------
@@ -1275,5 +1281,7 @@ void disturbance_Observer(){
 void sine_wave_vibration(){
 	vibration1 = sin(pass_freq1*time_count);
 	vibration2 = sin(pass_freq2*time_count);
+	sine_wave.x = vibration1;
+	sine_wave.y = vibration2;
 	time_count += delta_t.count();
 }
