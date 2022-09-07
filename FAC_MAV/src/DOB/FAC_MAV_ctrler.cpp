@@ -45,7 +45,7 @@ double freq=200;//controller loop frequency
 double pwm_freq=417.3;//pwm signal frequency
 
 std::chrono::duration<double> delta_t;
-int16_t Sbus[8];
+int16_t Sbus[9];
 int16_t PWM_d;
 int16_t loop_time;
 std_msgs::Int16MultiArray PWMs_cmd;
@@ -606,17 +606,7 @@ void publisherSet(){
 		pwm_Kill();	
 	}
 	else{
-		/*if(isArm){
-			//pwm_Arm();
-			rpyT_ctrl();
-		}
-		else{
-			pwm_Kill();
-		}*/
-		// ROS_INFO("r:%lf, p:%lf, y:%lf T:%lf", r_d, p_d, y_d, T_d);
-		rpyT_ctrl();	
-		//pwm_Arm();
-	
+		rpyT_ctrl();		
 	}
 	
 	//pwm_Calibration();
@@ -792,12 +782,13 @@ void rpyT_ctrl() {
 	}
 	if(F_zd > -0.5*mass*g) F_zd = -0.5*mass*g;
 	if(F_zd < -1.5*mass*g) F_zd = -1.5*mass*g;
-
-	F_xd = F_xd + vibration2;
-	F_yd = F_yd + vibration2;
-	F_zd = F_zd + vibration1;
 	
 	//ESC-----------------------------------------------------
+	if(Sbus[9]>1500){
+		F_xd = F_xd + vibration2;
+		F_yd = F_yd + vibration2;
+		F_zd = F_zd + vibration1;
+		/*	
 		x_dot_11 = -pass_freq1/Q_factor*x_11-pow(pass_freq1,2.0)*x_12+MoI_y_hat*angular_Accel.y;
 		x_dot_12 = x_11;
 		x_11 += x_dot_11*delta_t.count();
@@ -824,7 +815,8 @@ void rpyT_ctrl() {
 		double gradient_bias_z_c = vibration2*y_31;
 		bias_z_c += -G*gradient_bias_z_c*delta_t.count();;
 		z_c_hat += bias_z_c;
-
+		*/
+	}
 	//--------------------------------------------------------
 
 	//DOB-----------------------------------------------------
@@ -959,12 +951,10 @@ sensor_msgs::JointState servo_msg_create(double rr, double rp){
 }
 
 void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array){
-	for(int i=0;i<9;i++){
+	for(int i=0;i<10;i++){
 		Sbus[i]=map<int16_t>(array->data[i], 352, 1696, 1000,2000);
 	}
 	// PWM_d=Sbus[2];
-    // ROS_INFO("SBUS - [%d, %d, %d, %d, %d, %d, %d, %d]",Sbus[0], Sbus[1], Sbus[2], Sbus[3], Sbus[4], Sbus[5], Sbus[6], Sbus[7]);
-    
 	
 	return;
 }
