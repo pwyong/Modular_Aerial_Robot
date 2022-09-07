@@ -166,8 +166,8 @@ void setup() {
   Serial1.begin(100000,SERIAL_8E2);
   pinMode(BATTERY_V_PIN,INPUT);
   
-  sbus_msg.data=(short int *)malloc(sizeof(short int) * 9);
-  sbus_msg.data_length = 9;
+  sbus_msg.data=(short int *)malloc(sizeof(short int) * 10);
+  sbus_msg.data_length = 10;
   nh.initNode();
   nh.advertise(sbus);
   nh.advertise(battery);
@@ -191,7 +191,8 @@ void loop() {
   sbus_msg.data[6] = channel(7);
   sbus_msg.data[7] = channel(8);
   sbus_msg.data[8] = channel(10);
-
+  sbus_msg.data[9] = channel(13);
+  
   voltage_msg.data = analogRead(BATTERY_V_PIN);
   sbus.publish(&sbus_msg);
   battery.publish(&voltage_msg);
