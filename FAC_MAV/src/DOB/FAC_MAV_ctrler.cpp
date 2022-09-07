@@ -356,7 +356,7 @@ ros::Publisher force_command;
 ros::Publisher delta_time;
 ros::Publisher desired_velocity;
 ros::Publisher Center_of_Mass;
-ros::Publisher sine_wave_Data;
+ros::Publisher angular_Acceleration;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
@@ -553,7 +553,7 @@ int main(int argc, char **argv){
 	delta_time = nh.advertise<std_msgs::Float32>("delta_t",100);
 	desired_velocity = nh.advertise<geometry_msgs::Vector3>("lin_vel_d",100);
 	Center_of_Mass = nh.advertise<geometry_msgs::Vector3>("Center_of_Mass",100);
-	sine_wave_Data = nh.advertise<geometry_msgs::Vector3>("sine_wave",100);
+	angular_Acceleration = nh.advertise<geometry_msgs::Vector3>("ang_accel",100);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -644,7 +644,7 @@ void publisherSet(){
 	delta_time.publish(dt);
 	desired_velocity.publish(desired_lin_vel);
 	Center_of_Mass.publish(CoM);
-	sine_wave_Data.publish(sine_wave);
+	angular_Acceleration.publish(angular_Accel);
 }
 
 void setCM(){
