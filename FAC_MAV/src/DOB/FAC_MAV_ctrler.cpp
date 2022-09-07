@@ -789,14 +789,14 @@ void rpyT_ctrl() {
 		F_xd = F_xd + vibration2;
 		F_yd = F_yd + vibration2;
 		F_zd = F_zd + vibration1;
-		/*	
+		
 		x_dot_11 = -pass_freq1/Q_factor*x_11-pow(pass_freq1,2.0)*x_12+MoI_y_hat*angular_Accel.y;
 		x_dot_12 = x_11;
 		x_11 += x_dot_11*delta_t.count();
 		x_12 += x_dot_12*delta_t.count();
 		y_11 = pass_freq1/Q_factor*x_11;
 		double gradient_bias_x_c = vibration1*y_11;
-		bias_x_c += -G*gradient_bias_x_c*delta_t.count();;
+		bias_x_c += -G*gradient_bias_x_c*delta_t.count();
 		x_c_hat += bias_x_c;
 
 		x_dot_21 = -pass_freq1/Q_factor*x_21-pow(pass_freq1,2.0)*x_22+MoI_x_hat*angular_Accel.x;
@@ -805,7 +805,7 @@ void rpyT_ctrl() {
 		x_22 += x_dot_22*delta_t.count();
 		y_21 = pass_freq1/Q_factor*x_21;
 		double gradient_bias_y_c =vibration1*y_21;
-		bias_y_c += G*gradient_bias_y_c*delta_t.count();;
+		bias_y_c += G*gradient_bias_y_c*delta_t.count();
 		y_c_hat += bias_y_c;
 
 		x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
@@ -814,9 +814,9 @@ void rpyT_ctrl() {
 		x_32 += x_dot_32*delta_t.count();
 		y_31 = pass_freq2/Q_factor*x_31;
 		double gradient_bias_z_c = vibration2*y_31;
-		bias_z_c += -G*gradient_bias_z_c*delta_t.count();;
+		bias_z_c += -G*gradient_bias_z_c*delta_t.count();
 		z_c_hat += bias_z_c;
-		*/
+		
 	}
 	//--------------------------------------------------------
 
