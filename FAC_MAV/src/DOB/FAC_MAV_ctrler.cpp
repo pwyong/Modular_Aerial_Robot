@@ -443,6 +443,7 @@ double y_31=0;
 double vibration1=0;
 double vibration2=0;
 double time_count=0;
+double sine_wave_Amp=0.5;
 //-----------------------------------------------------
 
 int main(int argc, char **argv){
@@ -1268,8 +1269,8 @@ void disturbance_Observer(){
 }
 
 void sine_wave_vibration(){
-	vibration1 = sin(pass_freq1*time_count);
-	vibration2 = sin(pass_freq2*time_count);
+	vibration1 = sine_wave_Amp*sin(pass_freq1*time_count);
+	vibration2 = sine_wave_Amp*sin(pass_freq2*time_count);
 	sine_wave.x = vibration1;
 	sine_wave.y = vibration2;
 	time_count += delta_t.count();
