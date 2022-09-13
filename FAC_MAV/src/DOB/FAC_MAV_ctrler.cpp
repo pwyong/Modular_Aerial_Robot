@@ -415,6 +415,9 @@ double G_Z = 2.0;
 double bias_x_c = 0;
 double bias_y_c = 0;
 double bias_z_c = 0;
+double x_c_limit = 0.02;
+double y_c_limit = 0.02;
+double z_c_limit = 0.1;
 
 //Bandpass filter parameter
 double Q_factor=10;
@@ -446,7 +449,7 @@ double vibration1=0;
 double vibration2=0;
 double time_count=0;
 double Amp_XY=0.5;
-double Amp_Z=1.0;
+double Amp_Z=2.0;
 //-----------------------------------------------------
 
 int main(int argc, char **argv){
@@ -803,7 +806,8 @@ void rpyT_ctrl() {
 		double gradient_bias_x_c = vibration1*y_11;
 		bias_x_c += gradient_bias_x_c*delta_t.count();
 		x_c_hat = -G_XY*bias_x_c;
-		/*
+		if(fabs(x_c_hat)>x_c_limit) x_c_hat = x_c_hat/fabs(x_c_hat)*x_c_limit;
+		
 		x_dot_21 = -pass_freq1/Q_factor*x_21-pow(pass_freq1,2.0)*x_22+MoI_x_hat*angular_Accel.x;
 		x_dot_22 = x_21;
 		x_21 += x_dot_21*delta_t.count();
@@ -812,7 +816,8 @@ void rpyT_ctrl() {
 		double gradient_bias_y_c =vibration1*y_21;
 		bias_y_c += gradient_bias_y_c*delta_t.count();
 		y_c_hat = G_XY*bias_y_c;
-		
+		if(fabs(y_c_hat)>y_c_limit) y_c_hat = y_c_hat/fabs(y_c_hat)*y_c_limit;
+		/*
 		x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
 		x_dot_32 = x_31;
 		x_31 += x_dot_31*delta_t.count();
@@ -821,6 +826,7 @@ void rpyT_ctrl() {
 		double gradient_bias_z_c = vibration2*y_31;
 		bias_z_c += gradient_bias_z_c*delta_t.count();
 		z_c_hat = -G_Z*bias_z_c;
+		if(fabs(z_c_hat)>z_c_limit) z_c_hat = z_c_hat/fabs(z_c_hat)*z_c_limit;
 		*/
 	}
 	//--------------------------------------------------------
