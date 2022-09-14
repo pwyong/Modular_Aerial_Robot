@@ -407,22 +407,22 @@ geometry_msgs::Vector3 angular_Accel;
 geometry_msgs::Vector3 CoM;
 geometry_msgs::Vector3 sine_wave;
 
-double MoI_x_hat = 0.02;
-double MoI_y_hat = 0.02;
+double MoI_x_hat = 0.01;
+double MoI_y_hat = 0.01;
 double G_XY = 1.0;
 double G_Z = 2.0;
 
 double bias_x_c = 0;
 double bias_y_c = 0;
 double bias_z_c = 0;
-double x_c_limit = 0.02;
-double y_c_limit = 0.02;
+double x_c_limit = 0.03;
+double y_c_limit = 0.03;
 double z_c_limit = 0.1;
 
 //Bandpass filter parameter
 double Q_factor=10;
-double pass_freq1=10;
-double pass_freq2=5;
+double pass_freq1=5;
+double pass_freq2=10;
 
 //Filter1
 double x_11=0;
@@ -449,7 +449,7 @@ double vibration1=0;
 double vibration2=0;
 double time_count=0;
 double Amp_XY=0.5;
-double Amp_Z=2.0;
+double Amp_Z=1.0;
 //-----------------------------------------------------
 
 int main(int argc, char **argv){
@@ -585,6 +585,9 @@ void publisherSet(){
 	// 	     Eigen::MatrixXd::Zero(3,3),                 Eigen::MatrixXd::Identity(3,3);
 	sine_wave_vibration();
 	setCM();
+	angular_Accel.x = (imu_ang_vel.x-prev_angular_Vel.x)/delta_t.count();
+	angular_Accel.y = (imu_ang_vel.y-prev_angular_Vel.y)/delta_t.count();
+	angular_Accel.z = (imu_ang_vel.z-prev_angular_Vel.z)/delta_t.count();
 
 	if(Sbus[6]<=1500){
 		X_d_base=pos.x;
@@ -653,6 +656,7 @@ void publisherSet(){
 	Center_of_Mass.publish(CoM);
 	angular_Acceleration.publish(angular_Accel);
 	sine_wave_data.publish(sine_wave);
+	prev_angular_Vel = imu_ang_vel;
 }
 
 void setCM(){
@@ -681,12 +685,6 @@ void rpyT_ctrl() {
 	double e_Z = 0;
 	double e_X_dot = 0;
 	double e_Y_dot = 0;
-	
-	angular_Accel.x = (imu_ang_vel.x-prev_angular_Vel.x)/delta_t.count();
-	angular_Accel.y = (imu_ang_vel.y-prev_angular_Vel.y)/delta_t.count();
-	angular_Accel.z = (imu_ang_vel.z-prev_angular_Vel.z)/delta_t.count();
-
-
 		
     double global_X_ddot = imu_lin_acc.z*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.y*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.z)*cos(imu_rpy.y);
 	double global_Y_ddot = imu_lin_acc.y*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.z*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.y)*sin(imu_rpy.z);
