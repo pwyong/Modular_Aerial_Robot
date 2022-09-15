@@ -244,6 +244,7 @@ double voltage_old=16.0;
 
 
 //-DOB----------------------------------------------------
+geometry_msgs::Vector3 dhat;
 double fq_cutoff=0.5;//Q filter Cut-off frequency
 
 // Nominal MoI
@@ -358,6 +359,7 @@ ros::Publisher desired_velocity;
 ros::Publisher Center_of_Mass;
 ros::Publisher angular_Acceleration;
 ros::Publisher sine_wave_data;
+ros::Publisher disturbance;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
@@ -561,6 +563,7 @@ int main(int argc, char **argv){
 	Center_of_Mass = nh.advertise<geometry_msgs::Vector3>("Center_of_Mass",100);
 	angular_Acceleration = nh.advertise<geometry_msgs::Vector3>("ang_accel",100);
 	sine_wave_data = nh.advertise<geometry_msgs::Vector3>("sine_wave",100);
+	disturbance = nh.advertise<geometry_msgs::Vector3>("dhat",100);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -656,6 +659,7 @@ void publisherSet(){
 	Center_of_Mass.publish(CoM);
 	angular_Acceleration.publish(angular_Accel);
 	sine_wave_data.publish(sine_wave);
+	disturbance.publish(dhat);
 	prev_angular_Vel = imu_ang_vel;
 }
 
@@ -1276,6 +1280,9 @@ void disturbance_Observer(){
 	double Qtautilde_y = pow(fq_cutoff,3)*y_y3;
 
 	double dhat_y = tauhat_y - Qtautilde_y;
+	dhat.x = dhat_r;
+	dhat.y = dhat_p;
+	dhat.z = dhat_y;
 
 	//tautilde_y_d = tau_y_d - dhat_y;
     tautilde_y_d = tau_y_d;
