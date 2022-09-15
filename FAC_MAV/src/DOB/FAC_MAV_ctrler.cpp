@@ -415,8 +415,8 @@ double G_Z = 2.0;
 double bias_x_c = 0;
 double bias_y_c = 0;
 double bias_z_c = 0;
-double x_c_limit = 0.03;
-double y_c_limit = 0.03;
+double x_c_limit = 0.04;
+double y_c_limit = 0.04;
 double z_c_limit = 0.1;
 
 //Bandpass filter parameter
@@ -695,6 +695,9 @@ void rpyT_ctrl() {
 		X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
 		Y_d = Y_d_base + XY_limit*(((double)Sbus[3]-(double)1500)/(double)500);
 		
+		//X_dot_d = -XYZ_dot_limit*(((double)Sbus[1]-(double)1500)/(double)500);
+		//Y_dot_d = XYZ_dot_limit*(((double)Sbus[3]-(double)1500)/(double)500);
+		///*
 		e_X = X_d - pos.x;
 		e_Y = Y_d - pos.y;
 		e_X_i += e_X * delta_t.count();
@@ -703,12 +706,14 @@ void rpyT_ctrl() {
 		if (fabs(e_Y_i) > pos_integ_limit) e_Y_i = (e_Y_i / fabs(e_Y_i)) * pos_integ_limit;
 	
 		X_dot_d = Pp * e_X + Ip * e_X_i - Dp * lin_vel.x;
-		desired_lin_vel.x = X_dot_d;
 		Y_dot_d = Pp * e_Y + Ip * e_Y_i - Dp * lin_vel.y;
-		desired_lin_vel.y = Y_dot_d;	
+		
 		if(fabs(X_dot_d) > XYZ_dot_limit) X_dot_d = (X_dot_d/fabs(X_dot_d))*XYZ_dot_limit;
 		if(fabs(Y_dot_d) > XYZ_dot_limit) Y_dot_d = (Y_dot_d/fabs(Y_dot_d))*XYZ_dot_limit;
-		
+		//*/
+		desired_lin_vel.x = X_dot_d;
+		desired_lin_vel.y = Y_dot_d;
+	
 		e_X_dot = X_dot_d - lin_vel.x;
 		e_Y_dot = Y_dot_d - lin_vel.y;
 		e_X_dot_i += e_X_dot * delta_t.count();
