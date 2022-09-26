@@ -2,6 +2,7 @@
 //2022.06.23 Ground Station Application
 //2022.08.XX DOB (Disturbance Observer) Application
 //2022.09.05 ESC (Extremum Seeking Control) Application
+//2022.09.21 Controller mode selection Application
 
 #include <ros/ros.h>
 #include <iostream>
@@ -63,6 +64,7 @@ geometry_msgs::Vector3 pos;
 geometry_msgs::Vector3 t265_lin_vel;
 geometry_msgs::Vector3 t265_ang_vel;
 geometry_msgs::Vector3 lin_vel;
+geometry_msgs::Vector3 prev_lin_vel;
 geometry_msgs::Vector3 ang_vel;
 geometry_msgs::Quaternion t265_quat;
 geometry_msgs::Quaternion rot;
@@ -75,6 +77,7 @@ std_msgs::Float32MultiArray force_cmd;
 geometry_msgs::Vector3 desired_lin_vel;
 geometry_msgs::Vector3 t265_att;
 geometry_msgs::Vector3 filtered_angular_rate;
+geometry_msgs::Vector3 lin_acl;
 std_msgs::Float32 altitude_d;
 std_msgs::Float32 battery_voltage_msg;
 std_msgs::Float32 battery_real_voltage;
@@ -83,8 +86,16 @@ bool servo_sw=false;
 double theta1_command, theta2_command;
 bool start_flag=false;
 bool tilting_flag=false;
-//Thruster_cmd
 
+//Mode selection flag
+bool attitude_mode = false;
+bool velocity_mode = false;
+bool position_mode = false;
+bool kill_mode = true;
+bool altitude_mode = false;
+bool tilt_mode = false;
+bool ESC_control = false;
+//Thruster_cmd
 double F1 = 0;//desired propeller 1 force
 double F2 = 0;//desired propeller 2 force
 double F3 = 0;//desired propeller 3 force
@@ -174,7 +185,7 @@ static double T_limit = 17;//(N)
 static double altitude_limit = 1;//(m)
 static double XY_limit = 0.5;
 static double XYZ_dot_limit=1;
-static double XYZ_ddot_limit=1;
+static double XYZ_ddot_limit=2;
 static double alpha_beta_limit=1;
 static double hardware_servo_limit=0.3;
 static double servo_command_limit = 0.2;
@@ -360,6 +371,7 @@ ros::Publisher Center_of_Mass;
 ros::Publisher angular_Acceleration;
 ros::Publisher sine_wave_data;
 ros::Publisher disturbance;
+ros::Publisher linear_acceleration;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
@@ -411,8 +423,8 @@ geometry_msgs::Vector3 sine_wave;
 
 double MoI_x_hat = 0.01;
 double MoI_y_hat = 0.01;
-double G_XY = 1.0;
-double G_Z = 2.0;
+double G_XY = 0.2;
+double G_Z = 0.5;
 
 double bias_x_c = 0;
 double bias_y_c = 0;
@@ -423,8 +435,8 @@ double z_c_limit = 0.1;
 
 //Bandpass filter parameter
 double Q_factor=10;
-double pass_freq1=5;
-double pass_freq2=10;
+double pass_freq1=5.0;
+double pass_freq2=5.0;
 
 //Filter1
 double x_11=0;
@@ -453,7 +465,13 @@ double time_count=0;
 double Amp_XY=0.5;
 double Amp_Z=1.0;
 //-----------------------------------------------------
-
+//Accelerometer LPF------------------------------------
+double x_ax_dot = 0;
+double x_ay_dot = 0;
+double x_ax = 0;
+double x_ay = 0;
+double accel_cutoff_freq = 5.0;
+//-----------------------------------------------------
 int main(int argc, char **argv){
 	
     	ros::init(argc, argv,"t3_mav_controller");
@@ -554,8 +572,6 @@ int main(int argc, char **argv){
 	desired_position = nh.advertise<geometry_msgs::Vector3>("pos_d",100);
 	position = nh.advertise<geometry_msgs::Vector3>("pos",100);
 	desired_force = nh.advertise<geometry_msgs::Vector3>("force_d",100);
-	kalman_angular_vel = nh.advertise<geometry_msgs::Vector3>("kalman_ang_vel",100);
-	kalman_angular_accel = nh.advertise<geometry_msgs::Vector3>("kalman_ang_accel",100);
 	battery_voltage = nh.advertise<std_msgs::Float32>("battery_voltage",100);
 	force_command = nh.advertise<std_msgs::Float32MultiArray>("force_cmd",100);
 	delta_time = nh.advertise<std_msgs::Float32>("delta_t",100);
@@ -564,6 +580,7 @@ int main(int argc, char **argv){
 	angular_Acceleration = nh.advertise<geometry_msgs::Vector3>("ang_accel",100);
 	sine_wave_data = nh.advertise<geometry_msgs::Vector3>("sine_wave",100);
 	disturbance = nh.advertise<geometry_msgs::Vector3>("dhat",100);
+	linear_acceleration = nh.advertise<geometry_msgs::Vector3>("lin_acl",100);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -591,19 +608,20 @@ void publisherSet(){
 	angular_Accel.x = (imu_ang_vel.x-prev_angular_Vel.x)/delta_t.count();
 	angular_Accel.y = (imu_ang_vel.y-prev_angular_Vel.y)/delta_t.count();
 	angular_Accel.z = (imu_ang_vel.z-prev_angular_Vel.z)/delta_t.count();
-
-	if(Sbus[6]<=1500){
+	if(!position_mode){
 		X_d_base=pos.x;
 		Y_d_base=pos.y;
 		X_d = X_d_base;
 		Y_d = Y_d_base;
 		e_X_i=0;
-		e_X_dot_i=0;
 		e_Y_i=0;
-		e_Y_dot_i=0;		
+		if(attitude_mode){
+			e_X_dot_i=0;
+			e_Y_dot_i=0;	
+		}	
 	}
 
-	if(Sbus[4]<1500/*isKill*/){	
+	if(kill_mode){	
 		y_d=imu_rpy.z;	//[J]This line ensures that yaw desired right after disabling the kill switch becomes current yaw attitude
 		Z_d_base=pos.z;
 		e_r_i = 0;
@@ -623,8 +641,7 @@ void publisherSet(){
 		rpyT_ctrl();		
 	}
 	
-	//pwm_Calibration();
-	//kalman_Filtering();	
+	//pwm_Calibration();	
 	angle_d.x=r_d;
 	angle_d.y=p_d;
 	angle_d.z=y_d;
@@ -650,8 +667,6 @@ void publisherSet(){
 	desired_position.publish(desired_pos);
 	position.publish(pos);
 	desired_force.publish(force_d);
-	kalman_angular_vel.publish(filtered_Angular_vel);
-	kalman_angular_accel.publish(filtered_Angular_accel);
 	battery_voltage.publish(battery_voltage_msg);
 	force_command.publish(force_cmd);
 	delta_time.publish(dt);
@@ -660,7 +675,9 @@ void publisherSet(){
 	angular_Acceleration.publish(angular_Accel);
 	sine_wave_data.publish(sine_wave);
 	disturbance.publish(dhat);
+	linear_acceleration.publish(lin_acl);
 	prev_angular_Vel = imu_ang_vel;
+	prev_lin_vel = lin_vel;
 }
 
 void setCM(){
@@ -690,28 +707,35 @@ void rpyT_ctrl() {
 	double e_X_dot = 0;
 	double e_Y_dot = 0;
 		
-    double global_X_ddot = imu_lin_acc.z*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.y*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.z)*cos(imu_rpy.y);
-	double global_Y_ddot = imu_lin_acc.y*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))-imu_lin_acc.z*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))+imu_lin_acc.x*cos(imu_rpy.y)*sin(imu_rpy.z);
-	double global_Z_ddot = g-imu_lin_acc.x*sin(imu_rpy.y)+imu_lin_acc.z*cos(imu_rpy.x)*cos(imu_rpy.y)+imu_lin_acc.y*cos(imu_rpy.y)*sin(imu_rpy.x);
+	double global_X_ddot = (lin_vel.x - prev_lin_vel.x)/delta_t.count();
+	double global_Y_ddot = (lin_vel.y - prev_lin_vel.y)/delta_t.count();
+	x_ax_dot=-accel_cutoff_freq*x_ax+global_X_ddot;
+	x_ax+=x_ax_dot*delta_t.count();
+	lin_acl.x=accel_cutoff_freq*x_ax;
+	x_ay_dot=-accel_cutoff_freq*x_ay+global_Y_ddot;
+	x_ay+=x_ay_dot*delta_t.count();
+	lin_acl.y=accel_cutoff_freq*x_ay;
 	//ROS_INFO("%lf",time_count);
 
-	if(Sbus[6]>1500){
-		X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
-		Y_d = Y_d_base + XY_limit*(((double)Sbus[3]-(double)1500)/(double)500);
+	if(position_mode || velocity_mode){
+		if(position_mode){
+			X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
+			Y_d = Y_d_base + XY_limit*(((double)Sbus[3]-(double)1500)/(double)500);
 		
-		//X_dot_d = -XYZ_dot_limit*(((double)Sbus[1]-(double)1500)/(double)500);
-		//Y_dot_d = XYZ_dot_limit*(((double)Sbus[3]-(double)1500)/(double)500);
-		///*
-		e_X = X_d - pos.x;
-		e_Y = Y_d - pos.y;
-		e_X_i += e_X * delta_t.count();
-		if (fabs(e_X_i) > pos_integ_limit) e_X_i = (e_X_i / fabs(e_X_i)) * pos_integ_limit;
-		e_Y_i += e_Y * delta_t.count();
-		if (fabs(e_Y_i) > pos_integ_limit) e_Y_i = (e_Y_i / fabs(e_Y_i)) * pos_integ_limit;
+			e_X = X_d - pos.x;
+			e_Y = Y_d - pos.y;
+			e_X_i += e_X * delta_t.count();
+			if (fabs(e_X_i) > pos_integ_limit) e_X_i = (e_X_i / fabs(e_X_i)) * pos_integ_limit;
+			e_Y_i += e_Y * delta_t.count();
+			if (fabs(e_Y_i) > pos_integ_limit) e_Y_i = (e_Y_i / fabs(e_Y_i)) * pos_integ_limit;
 	
-		X_dot_d = Pp * e_X + Ip * e_X_i - Dp * lin_vel.x;
-		Y_dot_d = Pp * e_Y + Ip * e_Y_i - Dp * lin_vel.y;
-		
+			X_dot_d = Pp * e_X + Ip * e_X_i - Dp * lin_vel.x;
+			Y_dot_d = Pp * e_Y + Ip * e_Y_i - Dp * lin_vel.y;
+		}
+		if(velocity_mode){
+			X_dot_d = -XYZ_dot_limit*(((double)Sbus[1]-(double)1500)/(double)500);
+			Y_dot_d = XYZ_dot_limit*(((double)Sbus[3]-(double)1500)/(double)500);
+		}	
 		if(fabs(X_dot_d) > XYZ_dot_limit) X_dot_d = (X_dot_d/fabs(X_dot_d))*XYZ_dot_limit;
 		if(fabs(Y_dot_d) > XYZ_dot_limit) Y_dot_d = (Y_dot_d/fabs(Y_dot_d))*XYZ_dot_limit;
 		//*/
@@ -725,17 +749,18 @@ void rpyT_ctrl() {
 		e_Y_dot_i += e_Y_dot * delta_t.count();
 		if (fabs(e_Y_dot_i) > vel_integ_limit) e_Y_dot_i = (e_Y_dot_i / fabs(e_Y_dot_i)) * vel_integ_limit;
 
-		X_ddot_d = Pv * e_X_dot + Iv * e_X_dot_i - Dv * global_X_ddot;
-		Y_ddot_d = Pv * e_Y_dot + Iv * e_Y_dot_i - Dv * global_Y_ddot;
+		X_ddot_d = Pv * e_X_dot + Iv * e_X_dot_i - Dv * lin_acl.x;
+		Y_ddot_d = Pv * e_Y_dot + Iv * e_Y_dot_i - Dv * lin_acl.y;
 		if(fabs(X_ddot_d) > XYZ_ddot_limit) X_ddot_d = (X_ddot_d/fabs(X_ddot_d))*XYZ_ddot_limit;
 		if(fabs(Y_ddot_d) > XYZ_ddot_limit) Y_ddot_d = (Y_ddot_d/fabs(Y_ddot_d))*XYZ_ddot_limit;
 		
-		if(Sbus[8]>1500){
+		if(tilt_mode){
 			r_d = 0.0;
 			p_d = 0.0;
 			F_xd = mass*(X_ddot_d*cos(imu_rpy.z)*cos(imu_rpy.y)+Y_ddot_d*sin(imu_rpy.z)*cos(imu_rpy.y)-(Z_ddot_d-g)*sin(imu_rpy.y));
 			F_yd = mass*(-X_ddot_d*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+Y_ddot_d*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.y)*sin(imu_rpy.z))+(Z_ddot_d-g)*cos(imu_rpy.y)*sin(imu_rpy.x));
-	
+			//if(position_mode) ROS_INFO("Position & Tilt !!!");
+			//else ROS_INFO("Velocity & Tilt !!!");
 		}
 		else{
 			alpha=(-sin(imu_rpy.z)*X_ddot_d+cos(imu_rpy.z)*Y_ddot_d)/g;
@@ -746,15 +771,18 @@ void rpyT_ctrl() {
 			p_d = asin(beta/cos(imu_rpy.x));
 			if(fabs(r_d)>rp_limit) r_d = (r_d/fabs(r_d))*rp_limit;
 			if(fabs(p_d)>rp_limit) p_d = (p_d/fabs(p_d))*rp_limit;
-			//ROS_INFO("Position Control!!");
+			
+			//if(position_mode) ROS_INFO("Position & Conventional !!!");
+			//else ROS_INFO("Velocity & Conventional !!!");
 		}
 	}
-	else{
-		if(Sbus[8]>1500){
+	if(attitude_mode){
+		if(tilt_mode){
 			r_d = 0.0;
 			p_d = 0.0;
 			F_xd=-mass*XYZ_ddot_limit*(((double)Sbus[1]-(double)1500)/(double)500);
 			F_yd=mass*XYZ_ddot_limit*(((double)Sbus[3]-(double)1500)/(double)500);
+			//ROS_INFO("Attitude & Tilt !!!");
 
 		}
 		else{
@@ -763,6 +791,7 @@ void rpyT_ctrl() {
 			//ROS_INFO("Attidue Control!!");
 			F_xd=0.0;
 			F_yd=0.0;
+			//ROS_INFO("Attitude & Conventional");
 		}
 	}
 	
@@ -784,23 +813,24 @@ void rpyT_ctrl() {
 	tau_y_d = Py * e_y + Dy * (-imu_ang_vel.z);
 	if(fabs(tau_y_d) > tau_y_limit) tau_y_d = tau_y_d/fabs(tau_y_d)*tau_y_limit;
 	
-	if(Sbus[5]>1500){
+	if(altitude_mode){
 		Z_ddot_d = Pz * e_Z + Iz * e_Z_i - Dz * lin_vel.z;
 		desired_lin_vel.z = Z_ddot_d; // But this is desired acceleration
 		if(Sbus[6]>1500) F_zd = mass*(X_ddot_d*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-Y_ddot_d*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.y)*sin(imu_rpy.z))+(Z_ddot_d-g)*cos(imu_rpy.x)*cos(imu_rpy.y));
 		else F_zd = mass*(Z_ddot_d-g);
+		//ROS_INFO("Altitude");
 	}
 	else{
 		e_Z_i = 0;
 		e_Z_dot_i = 0;
 		F_zd=T_d;
-		// ROS_INFO("Manual Thrust!!");
+		//ROS_INFO("Manual Thrust!!");
 	}
 	if(F_zd > -0.5*mass*g) F_zd = -0.5*mass*g;
 	if(F_zd < -1.5*mass*g) F_zd = -1.5*mass*g;
 	
 	//ESC-----------------------------------------------------
-	if(Sbus[9]>1500){
+	if(ESC_control){
 		//F_xd = F_xd + vibration2;
 		//F_yd = F_yd + vibration2;
 		F_zd = F_zd + vibration1;
@@ -835,11 +865,12 @@ void rpyT_ctrl() {
 		z_c_hat = -G_Z*bias_z_c;
 		if(fabs(z_c_hat)>z_c_limit) z_c_hat = z_c_hat/fabs(z_c_hat)*z_c_limit;
 		*/
+		//ROS_INFO("ESC");
 	}
 	//--------------------------------------------------------
 
 	//DOB-----------------------------------------------------
-		disturbance_Observer();
+		//disturbance_Observer();
 	//--------------------------------------------------------
 	tautilde_r_d = tau_r_d - dhat_r;
 	tautilde_p_d = tau_p_d - dhat_p;
@@ -971,11 +1002,36 @@ sensor_msgs::JointState servo_msg_create(double rr, double rp){
 
 void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array){
 	for(int i=0;i<10;i++){
-		Sbus[i]=map<int16_t>(array->data[i], 352, 1696, 1000,2000);
+		Sbus[i]=map<int16_t>(array->data[i], 352, 1696, 1000, 2000);
 	}
-	// PWM_d=Sbus[2];
 	
-	return;
+	if(Sbus[4]<1500) kill_mode=true;
+	else kill_mode=false;
+	
+	if(Sbus[5]>1500) altitude_mode=true;
+	else altitude_mode=false;
+
+	if(Sbus[6]<1300){
+		attitude_mode=true;
+		velocity_mode=false;
+		position_mode=false;
+	}
+	else if(Sbus[6]<1700){
+		attitude_mode=false;
+		velocity_mode=true;
+		position_mode=false;
+	}
+	else{
+		attitude_mode=false;
+		velocity_mode=false;
+		position_mode=true;
+	}
+
+	if(Sbus[8]>1500) tilt_mode=true;
+	else tilt_mode=false;
+	
+	if(Sbus[9]>1500) ESC_control=true;
+	else ESC_control=false;
 }
 
 
