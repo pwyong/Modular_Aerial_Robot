@@ -75,12 +75,12 @@
 		<!--Conventional Mode Velocity gains-->
 		<param name="conv_velocity_P_gain"	value="2.0"/>	
 		<param name="conv_velocity_I_gain"	value="1.0"/>	
-		<param name="conv_velocity_D_gain"	value="2.0"/>
+		<param name="conv_velocity_D_gain"	value="0.5"/>
 
 		<!--Conventional Mode Horizontal Position gains-->
 		<param name="conv_position_P_gain"	value="2.0"/>	
-		<param name="conv_position_I_gain"	value="0.3"/>	
-		<param name="conv_position_D_gain"	value="0.5"/>
+		<param name="conv_position_I_gain"	value="0.5"/>	
+		<param name="conv_position_D_gain"	value="1.0"/>
 	
 	<!--Tilt flight mode-->
 		<!--Tilt Mode attitude_rp gains-->
@@ -101,12 +101,12 @@
 		<!--Tilt Mode Velocity gains-->
 		<param name="tilt_velocity_P_gain"	value="2.0"/>	
 		<param name="tilt_velocity_I_gain"	value="1.0"/>	
-		<param name="tilt_velocity_D_gain"	value="0.2"/>
+		<param name="tilt_velocity_D_gain"	value="0.5"/>
 
 		<!--Tilt Mode Position gains-->
 		<param name="tilt_position_P_gain"	value="2.0"/>	
-		<param name="tilt_position_I_gain"	value="0.3"/>	
-		<param name="tilt_position_D_gain"	value="0.5"/>	
+		<param name="tilt_position_I_gain"	value="0.5"/>	
+		<param name="tilt_position_D_gain"	value="1.0"/>	
 
     <node name="FAC_MAV_DOB_node"  pkg="FAC_MAV" type="FAC_MAV_DOB_ctrler"  output="screen"/>
 

@@ -256,7 +256,7 @@ double voltage_old=16.0;
 
 //-DOB----------------------------------------------------
 geometry_msgs::Vector3 dhat;
-double fq_cutoff=0.5;//Q filter Cut-off frequency
+double fq_cutoff=1.0;//Q filter Cut-off frequency
 
 // Nominal MoI
 double J_x = 0.01;
@@ -423,7 +423,7 @@ geometry_msgs::Vector3 sine_wave;
 
 double MoI_x_hat = 0.01;
 double MoI_y_hat = 0.01;
-double G_XY = 0.2;
+double G_XY = 0.5;
 double G_Z = 0.5;
 
 double bias_x_c = 0;
@@ -435,7 +435,7 @@ double z_c_limit = 0.1;
 
 //Bandpass filter parameter
 double Q_factor=10;
-double pass_freq1=5.0;
+double pass_freq1=3.0;
 double pass_freq2=5.0;
 
 //Filter1
@@ -831,8 +831,8 @@ void rpyT_ctrl() {
 	
 	//ESC-----------------------------------------------------
 	if(ESC_control){
-		//F_xd = F_xd + vibration2;
-		//F_yd = F_yd + vibration2;
+		F_xd = F_xd + vibration2;
+		F_yd = F_yd + vibration2;
 		F_zd = F_zd + vibration1;
 		
 		x_dot_11 = -pass_freq1/Q_factor*x_11-pow(pass_freq1,2.0)*x_12+MoI_y_hat*angular_Accel.y;
@@ -854,7 +854,7 @@ void rpyT_ctrl() {
 		bias_y_c += gradient_bias_y_c*delta_t.count();
 		y_c_hat = G_XY*bias_y_c;
 		if(fabs(y_c_hat)>y_c_limit) y_c_hat = y_c_hat/fabs(y_c_hat)*y_c_limit;
-		/*
+		
 		x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
 		x_dot_32 = x_31;
 		x_31 += x_dot_31*delta_t.count();
@@ -864,7 +864,7 @@ void rpyT_ctrl() {
 		bias_z_c += gradient_bias_z_c*delta_t.count();
 		z_c_hat = -G_Z*bias_z_c;
 		if(fabs(z_c_hat)>z_c_limit) z_c_hat = z_c_hat/fabs(z_c_hat)*z_c_limit;
-		*/
+		
 		//ROS_INFO("ESC");
 	}
 	//--------------------------------------------------------
