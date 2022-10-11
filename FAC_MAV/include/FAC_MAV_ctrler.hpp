@@ -33,12 +33,6 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/Transform.h>
 #include <tf2_ros/transform_listener.h>
-#include <tf2_ros/static_transform_broadcaster.h>
-#include "FAC_MAV/ArmService.h" //ASDF
-#include "FAC_MAV/KillService.h" //ASDF
-#include "FAC_MAV/PosCtrlService.h" //ASDF
-#include "FAC_MAV/HoverService.h" //ASDF
-#include "FAC_MAV/FAC_HoverService.h" //ASDF
 
 #include "nav_msgs/Odometry.h"
 
@@ -99,6 +93,10 @@ bool ESC_control = false;
 //State
 bool hovering = false;
 bool loading = false;
+double hovering_time_count = 0;
+double hovering_force = 0;
+double hovering_count=0;
+double loading_time_count = 0;
 
 //Thruster_cmd
 double F1 = 0;//desired propeller 1 force
@@ -171,7 +169,7 @@ int yaw_rotate_count = 0;
 
 static double r_arm = 0.109;// m // diagonal length between thruster : 218mm;
 static double l_servo = 0.015;
-static double mass = 2.365;//(Kg)
+static double mass = 2.405;//(Kg)
 
 
 //Propeller constants(DJI E800(3510 motors + 620S ESCs))

@@ -24,9 +24,9 @@ void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg);
 void pid_Gain_Setting();
 void disturbance_Observer();
 void sine_wave_vibration();
+void ESC_controller();
+void state_Reader();
 //-------------------------------------------------------
-
-
 
 int main(int argc, char **argv){
 	
@@ -380,62 +380,7 @@ void rpyT_ctrl() {
 	
 	//ESC-----------------------------------------------------
 	if(ESC_control){
-		F_xd = F_xd + vibration2;
-		F_yd = F_yd + vibration2;
-		F_zd = F_zd + vibration1;
-		
-		x_dot_11 = -pass_freq1/Q_factor*x_11-pow(pass_freq1,2.0)*x_12+MoI_y_hat*angular_Accel.y;
-		x_dot_12 = x_11;
-		x_11 += x_dot_11*delta_t.count();
-		x_12 += x_dot_12*delta_t.count();
-		y_11 = pass_freq1/Q_factor*x_11;
-		double gradient_bias_x_c = vibration1*y_11;
-		x_grad_x_dot_1=-2.0*xy_cutoff_freq*x_grad_x_1-2.0*pow(xy_cutoff_freq,2)*x_grad_x_2-pow(xy_cutoff_freq,3)*x_grad_x_3+gradient_bias_x_c;
-		x_grad_x_dot_2=x_grad_x_1;
-		x_grad_x_dot_3=x_grad_x_2;
-		x_grad_x_1+=x_grad_x_dot_1*delta_t.count();
-		x_grad_x_2+=x_grad_x_dot_2*delta_t.count();
-		x_grad_x_3+=x_grad_x_dot_3*delta_t.count();
-		filtered_grad_x=pow(xy_cutoff_freq,3)*x_grad_x_3;
-		bias_x_c += filtered_grad_x*delta_t.count();
-		x_c_hat = -G_XY*bias_x_c;
-		if(fabs(x_c_hat)>x_c_limit) x_c_hat = x_c_hat/fabs(x_c_hat)*x_c_limit;
-		
-		x_dot_21 = -pass_freq1/Q_factor*x_21-pow(pass_freq1,2.0)*x_22+MoI_x_hat*angular_Accel.x;
-		x_dot_22 = x_21;
-		x_21 += x_dot_21*delta_t.count();
-		x_22 += x_dot_22*delta_t.count();
-		y_21 = pass_freq1/Q_factor*x_21;
-		double gradient_bias_y_c =vibration1*y_21;
-		x_grad_y_dot_1=-2.0*xy_cutoff_freq*x_grad_y_1-2.0*pow(xy_cutoff_freq,2)*x_grad_y_2-pow(xy_cutoff_freq,3)*x_grad_y_3+gradient_bias_y_c;
-		x_grad_y_dot_2=x_grad_y_1;
-		x_grad_y_dot_3=x_grad_y_2;
-		x_grad_y_1+=x_grad_y_dot_1*delta_t.count();
-		x_grad_y_2+=x_grad_y_dot_2*delta_t.count();
-		x_grad_y_3+=x_grad_y_dot_3*delta_t.count();
-		filtered_grad_y=pow(xy_cutoff_freq,3)*x_grad_y_3;
-		bias_y_c += filtered_grad_y*delta_t.count();
-		y_c_hat = G_XY*bias_y_c;
-		if(fabs(y_c_hat)>y_c_limit) y_c_hat = y_c_hat/fabs(y_c_hat)*y_c_limit;
-		
-		x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
-		x_dot_32 = x_31;
-		x_31 += x_dot_31*delta_t.count();
-		x_32 += x_dot_32*delta_t.count();
-		y_31 = pass_freq2/Q_factor*x_31;
-		double gradient_bias_z_c = vibration2*y_31;
-		x_grad_z_dot_1=-2.0*z_cutoff_freq*x_grad_z_1-2.0*pow(z_cutoff_freq,2)*x_grad_z_2-pow(z_cutoff_freq,3)*x_grad_z_3+gradient_bias_z_c;
-		x_grad_z_dot_2=x_grad_z_1;
-		x_grad_z_dot_3=x_grad_z_2;
-		x_grad_z_1+=x_grad_z_dot_1*delta_t.count();
-		x_grad_z_2+=x_grad_z_dot_2*delta_t.count();
-		x_grad_z_3+=x_grad_z_dot_3*delta_t.count();
-		filtered_grad_z=pow(z_cutoff_freq,3)*x_grad_z_3;
-		bias_z_c += filtered_grad_z*delta_t.count();
-		z_c_hat = -G_Z*bias_z_c;
-		if(fabs(z_c_hat)>z_c_limit) z_c_hat = z_c_hat/fabs(z_c_hat)*z_c_limit;
-		
-		//ROS_INFO("ESC");
+		ESC_controller();
 	}
 	//--------------------------------------------------------
 
@@ -544,10 +489,6 @@ void imu_Callback(const sensor_msgs::Imu& msg){
 	yaw_prev = base_yaw;
 	// ROS_INFO("imuCallback time : %f",(((double)ros::Time::now().sec-(double)imuTimer.sec)+((double)ros::Time::now().nsec-(double)imuTimer.nsec)/1000000000.));
 	//imuTimer = ros::Time::now();
-}
-
-void filterCallback(const sensor_msgs::Imu& msg){
-	filtered_angular_rate=msg.angular_velocity;
 }
 
 sensor_msgs::JointState servo_msg_create(double rr, double rp){
@@ -785,4 +726,108 @@ void sine_wave_vibration(){
 	time_count += delta_t.count();
 }
 
-//-------------------------------------------------------
+void ESC_controller(){
+		F_xd = F_xd + vibration2;
+		F_yd = F_yd + vibration2;
+		F_zd = F_zd + vibration1;
+		
+		x_dot_11 = -pass_freq1/Q_factor*x_11-pow(pass_freq1,2.0)*x_12+MoI_y_hat*angular_Accel.y;
+		x_dot_12 = x_11;
+		x_11 += x_dot_11*delta_t.count();
+		x_12 += x_dot_12*delta_t.count();
+		y_11 = pass_freq1/Q_factor*x_11;
+		double gradient_bias_x_c = vibration1*y_11;
+		x_grad_x_dot_1=-2.0*xy_cutoff_freq*x_grad_x_1-2.0*pow(xy_cutoff_freq,2)*x_grad_x_2-pow(xy_cutoff_freq,3)*x_grad_x_3+gradient_bias_x_c;
+		x_grad_x_dot_2=x_grad_x_1;
+		x_grad_x_dot_3=x_grad_x_2;
+		x_grad_x_1+=x_grad_x_dot_1*delta_t.count();
+		x_grad_x_2+=x_grad_x_dot_2*delta_t.count();
+		x_grad_x_3+=x_grad_x_dot_3*delta_t.count();
+		filtered_grad_x=pow(xy_cutoff_freq,3)*x_grad_x_3;
+		bias_x_c += filtered_grad_x*delta_t.count();
+		x_c_hat = -G_XY*bias_x_c;
+		if(fabs(x_c_hat)>x_c_limit) x_c_hat = x_c_hat/fabs(x_c_hat)*x_c_limit;
+		
+		x_dot_21 = -pass_freq1/Q_factor*x_21-pow(pass_freq1,2.0)*x_22+MoI_x_hat*angular_Accel.x;
+		x_dot_22 = x_21;
+		x_21 += x_dot_21*delta_t.count();
+		x_22 += x_dot_22*delta_t.count();
+		y_21 = pass_freq1/Q_factor*x_21;
+		double gradient_bias_y_c =vibration1*y_21;
+		x_grad_y_dot_1=-2.0*xy_cutoff_freq*x_grad_y_1-2.0*pow(xy_cutoff_freq,2)*x_grad_y_2-pow(xy_cutoff_freq,3)*x_grad_y_3+gradient_bias_y_c;
+		x_grad_y_dot_2=x_grad_y_1;
+		x_grad_y_dot_3=x_grad_y_2;
+		x_grad_y_1+=x_grad_y_dot_1*delta_t.count();
+		x_grad_y_2+=x_grad_y_dot_2*delta_t.count();
+		x_grad_y_3+=x_grad_y_dot_3*delta_t.count();
+		filtered_grad_y=pow(xy_cutoff_freq,3)*x_grad_y_3;
+		bias_y_c += filtered_grad_y*delta_t.count();
+		y_c_hat = G_XY*bias_y_c;
+		if(fabs(y_c_hat)>y_c_limit) y_c_hat = y_c_hat/fabs(y_c_hat)*y_c_limit;
+		
+		x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
+		x_dot_32 = x_31;
+		x_31 += x_dot_31*delta_t.count();
+		x_32 += x_dot_32*delta_t.count();
+		y_31 = pass_freq2/Q_factor*x_31;
+		double gradient_bias_z_c = vibration2*y_31;
+		x_grad_z_dot_1=-2.0*z_cutoff_freq*x_grad_z_1-2.0*pow(z_cutoff_freq,2)*x_grad_z_2-pow(z_cutoff_freq,3)*x_grad_z_3+gradient_bias_z_c;
+		x_grad_z_dot_2=x_grad_z_1;
+		x_grad_z_dot_3=x_grad_z_2;
+		x_grad_z_1+=x_grad_z_dot_1*delta_t.count();
+		x_grad_z_2+=x_grad_z_dot_2*delta_t.count();
+		x_grad_z_3+=x_grad_z_dot_3*delta_t.count();
+		filtered_grad_z=pow(z_cutoff_freq,3)*x_grad_z_3;
+		bias_z_c += filtered_grad_z*delta_t.count();
+		z_c_hat = -G_Z*bias_z_c;
+		if(fabs(z_c_hat)>z_c_limit) z_c_hat = z_c_hat/fabs(z_c_hat)*z_c_limit;
+		
+		//ROS_INFO("ESC");
+}
+
+void state_Reader(){
+	if(!hovering){
+		if(Z_d>0.3){
+			if(fabs(Z_d-pos.z)<0.05){
+				hovering_time_count+=delta_t.count();
+				hovering_force+=F_zd;
+				hovering_count++;
+				if(hovering_time_count>2.0) {
+					hovering=true;
+					hovering_force=hovering_force/hovering_count;
+					ROS_INFO("Hovering");
+				}
+			}
+			else{
+				hovering_time_count = 0;
+				hovering_count = 0;
+				hovering_force = 0;
+			}
+		}
+	}
+	else{
+		if(fabs(Z_d-pos.z)>0.1) {
+			hovering=false;
+			hovering_time_count = 0;
+			hovering_count = 0;
+			hovering_force = 0;
+		}
+	}
+
+	if(!loading){
+		if(hovering){
+			if(F_zd-hovering_force<2.0){
+				loading_time_count+=delta_t.count();
+				if(loading_time_count>1.5){
+					loading = true;
+					loading_time_count = 0;
+					ROS_INFO("Loading");
+				}
+			}
+		}
+	}
+	else{
+		tilt_mode = true;
+		ESC_control = true;
+	}
+}
