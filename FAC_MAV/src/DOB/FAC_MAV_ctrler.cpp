@@ -45,13 +45,16 @@ int main(int argc, char **argv){
 		pos_integ_limit=nh.param<double>("position_integ_limit",10);
 
 		//Center of Mass
-		x_c_hat=nh.param<double>("x_center_of_mass",0.0);
-		y_c_hat=nh.param<double>("y_center_of_mass",0.0);
-		z_c_hat=nh.param<double>("z_center_of_mass",0.0);
-		CoM.x = x_c_hat;
-		CoM.y = y_c_hat;
-		CoM.z = z_c_hat;
-
+		x_c_init=nh.param<double>("x_center_of_mass",0.0);
+		y_c_init=nh.param<double>("y_center_of_mass",0.0);
+		z_c_init=nh.param<double>("z_center_of_mass",0.0);
+		
+		CoM.x = x_c_init;
+		CoM.y = y_c_init;
+		CoM.z = z_c_init;
+		x_c_hat = x_c_init;
+		y_c_hat = y_c_init;
+		z_c_hat = z_c_init;
 		//Conventional Flight Mode Control Gains
 			//Roll, Pitch PID gains
 			conv_Pa=nh.param<double>("conv_attitude_rp_P_gain",3.5);
@@ -130,6 +133,7 @@ int main(int argc, char **argv){
 	sine_wave_data = nh.advertise<geometry_msgs::Vector3>("sine_wave",100);
 	disturbance = nh.advertise<geometry_msgs::Vector3>("dhat",100);
 	linear_acceleration = nh.advertise<geometry_msgs::Vector3>("lin_acl",100);
+	bias_gradient = nh.advertise<geometry_msgs::Vector3>("bias_gradient",100);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -154,6 +158,7 @@ void publisherSet(){
 	// 	     Eigen::MatrixXd::Zero(3,3),                 Eigen::MatrixXd::Identity(3,3);
 	sine_wave_vibration();
 	setCM();
+	state_Reader();
 	angular_Accel.x = (imu_ang_vel.x-prev_angular_Vel.x)/delta_t.count();
 	angular_Accel.y = (imu_ang_vel.y-prev_angular_Vel.y)/delta_t.count();
 	angular_Accel.z = (imu_ang_vel.z-prev_angular_Vel.z)/delta_t.count();
@@ -225,6 +230,7 @@ void publisherSet(){
 	sine_wave_data.publish(sine_wave);
 	disturbance.publish(dhat);
 	linear_acceleration.publish(lin_acl);
+	bias_gradient.publish(filtered_bias_gradient);
 	prev_angular_Vel = imu_ang_vel;
 	prev_lin_vel = lin_vel;
 }
@@ -408,7 +414,7 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 	//Co-rotating coaxial
 	//Conventional type
 	F_cmd = invCM*u;
-	if(Sbus[8]<=1500){
+	if(!tilt_mode){
 		theta1_command = 0.0;
         theta2_command = 0.0;
 	}
@@ -534,11 +540,12 @@ void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array){
 		position_mode=true;
 	}
 
-	if(Sbus[8]>1500) tilt_mode=true;
+	/*if(Sbus[8]>1500) tilt_mode=true;
 	else tilt_mode=false;
 	
 	if(Sbus[9]>1500) ESC_control=true;
 	else ESC_control=false;
+	*/
 }
 
 
@@ -745,7 +752,7 @@ void ESC_controller(){
 		x_grad_x_3+=x_grad_x_dot_3*delta_t.count();
 		filtered_grad_x=pow(xy_cutoff_freq,3)*x_grad_x_3;
 		bias_x_c += filtered_grad_x*delta_t.count();
-		x_c_hat = -G_XY*bias_x_c;
+		x_c_hat = x_c_init-G_XY*bias_x_c;
 		if(fabs(x_c_hat)>x_c_limit) x_c_hat = x_c_hat/fabs(x_c_hat)*x_c_limit;
 		
 		x_dot_21 = -pass_freq1/Q_factor*x_21-pow(pass_freq1,2.0)*x_22+MoI_x_hat*angular_Accel.x;
@@ -762,7 +769,7 @@ void ESC_controller(){
 		x_grad_y_3+=x_grad_y_dot_3*delta_t.count();
 		filtered_grad_y=pow(xy_cutoff_freq,3)*x_grad_y_3;
 		bias_y_c += filtered_grad_y*delta_t.count();
-		y_c_hat = G_XY*bias_y_c;
+		y_c_hat = y_c_init+G_XY*bias_y_c;
 		if(fabs(y_c_hat)>y_c_limit) y_c_hat = y_c_hat/fabs(y_c_hat)*y_c_limit;
 		
 		x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
@@ -779,20 +786,23 @@ void ESC_controller(){
 		x_grad_z_3+=x_grad_z_dot_3*delta_t.count();
 		filtered_grad_z=pow(z_cutoff_freq,3)*x_grad_z_3;
 		bias_z_c += filtered_grad_z*delta_t.count();
-		z_c_hat = -G_Z*bias_z_c;
+		z_c_hat = z_c_init-G_Z*bias_z_c;
 		if(fabs(z_c_hat)>z_c_limit) z_c_hat = z_c_hat/fabs(z_c_hat)*z_c_limit;
-		
+	 	
+		filtered_bias_gradient.x=filtered_grad_x;
+		filtered_bias_gradient.y=filtered_grad_y;
+		filtered_bias_gradient.z=filtered_grad_z;
 		//ROS_INFO("ESC");
 }
 
 void state_Reader(){
 	if(!hovering){
 		if(Z_d<-0.3){
-			if(fabs(Z_d-pos.z)<0.05){
+			if(fabs(Z_d-pos.z)<0.02){
 				hovering_time_count+=delta_t.count();
 				hovering_force+=F_zd;
 				hovering_count++;
-				if(hovering_time_count>2.0) {
+				if(hovering_time_count>3.0) {
 					hovering=true;
 					hovering_force=hovering_force/hovering_count;
 					ROS_INFO("Hovering");
@@ -815,20 +825,82 @@ void state_Reader(){
 		// }
 	}
 
-	// if(!loading){
-	// 	if(hovering){
-	// 		if(F_zd-hovering_force<2.0){
-	// 			loading_time_count+=delta_t.count();
-	// 			if(loading_time_count>1.5){
-	// 				loading = true;
-	// 				loading_time_count = 0;
-	// 				ROS_INFO("Loading");
-	// 			}
-	// 		}
-	// 	}
-	// }
-	// else{
-	// 	tilt_mode = true;
-	// 	ESC_control = true;
-	// }
+	if(!loading){
+	 	if(hovering){
+	 		if(F_zd-hovering_force<-2.0 && fabs(Z_d-pos.z)<0.02){
+	 			loading_time_count+=delta_t.count();
+				loading_force+=F_zd;
+				loading_count++;
+	 			if(loading_time_count>2.0){
+	 				loading = true;
+	 				loading_force=loading_force/loading_count;
+	 				ROS_INFO("Loading");
+					ROS_INFO("Estimating CoM...");
+					tilt_mode = true;
+					ESC_control = true;
+	 			}
+	 		}
+			else{
+				loading_time_count=0;
+				loading_count=0;
+				loading_force=0;
+			}
+	 	}
+	}
+	else{
+		if(hovering){
+			if(!x_c_convergence && fabs(filtered_grad_x*1000)<0.2){
+				x_c_convergence_time_count+=delta_t.count();
+				if(x_c_convergence_time_count>10.0){
+					x_c_convergence = true;
+					ROS_INFO("x_c Estimation complete");
+				}
+			}
+			else{
+				x_c_convergence_time_count = 0;
+			}
+			if(!y_c_convergence && fabs(filtered_grad_y*1000)<0.2){
+				y_c_convergence_time_count+=delta_t.count();
+				if(y_c_convergence_time_count>10.0){
+					y_c_convergence = true;
+					ROS_INFO("y_c Estimation complete");
+				}
+			}
+			else{
+				y_c_convergence_time_count= 0;
+			}
+			if(!z_c_convergence && fabs(filtered_grad_z*1000)<1.0){
+				z_c_convergence_time_count+=delta_t.count();
+				if(z_c_convergence_time_count>10.0){
+					z_c_convergence = true;
+				}
+			}
+			else{
+				z_c_convergence_time_count = 0;
+			}
+		
+			if(x_c_convergence && y_c_convergence && z_c_convergence){
+				ESC_control = false;
+				ROS_INFO("CoM Estimation complete");
+				ROS_INFO("x_c : %lf / y_c : %lf / z_c : %lf",x_c_hat, y_c_hat, z_c_hat);
+			}
+		
+			if(fabs(F_zd-hovering_force)<0.5 && fabs(Z_d-pos.z)<0.02){
+				unloading_time_count+=delta_t.count();
+				if(unloading_time_count>1.0){
+					loading=false;
+					tilt_mode=false;
+					x_c_hat=x_c_init;
+					y_c_hat=y_c_init;
+					z_c_hat=z_c_init;
+					bias_x_c=0;
+					bias_y_c=0;
+					bias_z_c=0;
+				}
+			}
+			else{
+				unloading_time_count=0;
+			}
+		}
+	}
 }

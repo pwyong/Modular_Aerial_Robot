@@ -76,6 +76,8 @@ std_msgs::Float32 altitude_d;
 std_msgs::Float32 battery_voltage_msg;
 std_msgs::Float32 battery_real_voltage;
 std_msgs::Float32 dt;
+geometry_msgs::Vector3 filtered_bias_gradient;
+
 bool servo_sw=false;
 double theta1_command, theta2_command;
 bool start_flag=false;
@@ -95,8 +97,17 @@ bool hovering = false;
 bool loading = false;
 double hovering_time_count = 0;
 double hovering_force = 0;
-double hovering_count=0;
+double hovering_count = 0;
 double loading_time_count = 0;
+double loading_force = 0;
+double unloading_time_count=0;
+double loading_count = 0;
+bool x_c_convergence = false;
+bool y_c_convergence = false;
+bool z_c_convergence = false;
+double x_c_convergence_time_count = 0;
+double y_c_convergence_time_count = 0;
+double z_c_convergence_time_count = 0;
 
 //Thruster_cmd
 double F1 = 0;//desired propeller 1 force
@@ -345,6 +356,7 @@ ros::Publisher angular_Acceleration;
 ros::Publisher sine_wave_data;
 ros::Publisher disturbance;
 ros::Publisher linear_acceleration;
+ros::Publisher bias_gradient;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
@@ -382,6 +394,9 @@ double MoI_y_hat = 0.01;
 double G_XY = 0.5;
 double G_Z = 0.5;
 
+double x_c_init = 0.0;
+double y_c_init = 0.0;
+double z_c_init = -0.04;
 double bias_x_c = 0;
 double bias_y_c = 0;
 double bias_z_c = 0;
