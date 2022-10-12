@@ -787,7 +787,7 @@ void ESC_controller(){
 
 void state_Reader(){
 	if(!hovering){
-		if(Z_d>0.3){
+		if(Z_d<-0.3){
 			if(fabs(Z_d-pos.z)<0.05){
 				hovering_time_count+=delta_t.count();
 				hovering_force+=F_zd;
@@ -796,6 +796,7 @@ void state_Reader(){
 					hovering=true;
 					hovering_force=hovering_force/hovering_count;
 					ROS_INFO("Hovering");
+					ROS_INFO("%lf",hovering_force);
 				}
 			}
 			else{
@@ -806,28 +807,28 @@ void state_Reader(){
 		}
 	}
 	else{
-		if(fabs(Z_d-pos.z)>0.1) {
-			hovering=false;
-			hovering_time_count = 0;
-			hovering_count = 0;
-			hovering_force = 0;
-		}
+		// if(fabs(Z_d-pos.z)>0.1) {
+		// 	hovering=false;
+		// 	hovering_time_count = 0;
+		// 	hovering_count = 0;
+		// 	hovering_force = 0;
+		// }
 	}
 
-	if(!loading){
-		if(hovering){
-			if(F_zd-hovering_force<2.0){
-				loading_time_count+=delta_t.count();
-				if(loading_time_count>1.5){
-					loading = true;
-					loading_time_count = 0;
-					ROS_INFO("Loading");
-				}
-			}
-		}
-	}
-	else{
-		tilt_mode = true;
-		ESC_control = true;
-	}
+	// if(!loading){
+	// 	if(hovering){
+	// 		if(F_zd-hovering_force<2.0){
+	// 			loading_time_count+=delta_t.count();
+	// 			if(loading_time_count>1.5){
+	// 				loading = true;
+	// 				loading_time_count = 0;
+	// 				ROS_INFO("Loading");
+	// 			}
+	// 		}
+	// 	}
+	// }
+	// else{
+	// 	tilt_mode = true;
+	// 	ESC_control = true;
+	// }
 }
