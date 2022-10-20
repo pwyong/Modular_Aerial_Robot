@@ -59,7 +59,7 @@
 	<!--Conventional flight mode-->
     		<!--Conventional Mode attitude_rp gains-->
     		<param name="conv_attitude_rp_P_gain"	value="2.0"/>
-    		<param name="conv_attitude_rp_I_gain"	value="0.2"/>
+    		<param name="conv_attitude_rp_I_gain"	value="0.1"/>
     		<param name="conv_attitude_rp_D_gain"	value="0.45"/>
 
 		<!--Conventional Mode attitude_y gain-->
@@ -70,7 +70,7 @@
 		<!--Conventional Mode Altitude gains-->
 		<param name="conv_altitude_P_gain"	value="10.0"/>
 		<param name="conv_altitude_I_gain"	value="5.0"/>
-		<param name="conv_altitude_D_gain"	value="5.0"/>
+		<param name="conv_altitude_D_gain"	value="6.0"/>
 
 		<!--Conventional Mode Velocity gains-->
 		<param name="conv_velocity_P_gain"	value="2.0"/>	
@@ -85,7 +85,7 @@
 	<!--Tilt flight mode-->
 		<!--Tilt Mode attitude_rp gains-->
 		<param name="tilt_attitude_rp_P_gain"	value="2.0"/>	
-		<param name="tilt_attitude_rp_I_gain"	value="0.2"/>
+		<param name="tilt_attitude_rp_I_gain"	value="0.1"/>
 		<param name="tilt_attitude_rp_D_gain"	value="0.45"/>
 
 		<!--Tilt Mode attitude_y gains-->
@@ -96,7 +96,7 @@
 		<!--Tilt Mode Altitude gains-->
 		<param name="tilt_altitude_P_gain"	value="10.0"/>
 		<param name="tilt_altitude_I_gain"	value="5.0"/>
-		<param name="tilt_altitude_D_gain"	value="5.0"/>
+		<param name="tilt_altitude_D_gain"	value="6.0"/>
 
 		<!--Tilt Mode Velocity gains-->
 		<param name="tilt_velocity_P_gain"	value="2.0"/>	

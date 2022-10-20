@@ -274,9 +274,27 @@ void rpyT_ctrl() {
 
 	if(position_mode || velocity_mode){
 		if(position_mode){
-			X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
-			Y_d = Y_d_base + XY_limit*(((double)Sbus[3]-(double)1500)/(double)500);
-		
+			if(!estimating){
+				X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
+				Y_d = Y_d_base + XY_limit*(((double)Sbus[3]-(double)1500)/(double)500);
+				traj_timer = 0;
+			}
+			else{
+				if(trajectory_flag){
+					X_d = X_d_base;
+					Y_d = Y_d_base+Amp-Amp*cos(2*pi/Tp*traj_timer);
+					traj_timer+=delta_t.count();
+				}
+				else{
+					if(traj_timer>0.1){
+						X_d_base=X_d;
+						Y_d_base=Y_d;
+						traj_timer = 0;
+					}
+					X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
+					Y_d = Y_d_base + XY_limit*(((double)Sbus[3]-(double)1500)/(double)500);
+				}
+			}
 			e_X = X_d - pos.x;
 			e_Y = Y_d - pos.y;
 			e_X_i += e_X * delta_t.count();
@@ -542,10 +560,10 @@ void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array){
 
 	/*if(Sbus[8]>1500) tilt_mode=true;
 	else tilt_mode=false;
+	*/	
+	if(Sbus[9]>1500) trajectory_flag=true;
+	else trajectory_flag=false;
 	
-	if(Sbus[9]>1500) ESC_control=true;
-	else ESC_control=false;
-	*/
 }
 
 
@@ -606,7 +624,7 @@ void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg){
 
 
 void pid_Gain_Setting(){
-	if(Sbus[8]<=1500){
+	if(!tilt_mode){
 		Pa = conv_Pa;
 		Ia = conv_Ia;
 		Da = conv_Da;
@@ -657,7 +675,7 @@ void disturbance_Observer(){
 	x_dot_r1 = -2*fq_cutoff*x_r1-2*pow(fq_cutoff,2)*x_r2-pow(fq_cutoff,3)*x_r3+imu_rpy.x;
 	x_dot_r2 = x_r1;
 	x_dot_r3 = x_r2;
-    x_r1 += x_dot_r1*delta_t.count(); 
+    	x_r1 += x_dot_r1*delta_t.count(); 
 	x_r2 += x_dot_r2*delta_t.count(); 
 	x_r3 += x_dot_r3*delta_t.count(); 
 	double tauhat_r = J_x*pow(fq_cutoff,3)*x_r1;
@@ -734,61 +752,66 @@ void sine_wave_vibration(){
 }
 
 void ESC_controller(){
-		F_xd = F_xd + vibration2;
-		F_yd = F_yd + vibration2;
-		F_zd = F_zd + vibration1;
+		//if(!x_c_convergence || !y_c_convergence){
+			F_zd = F_zd + vibration1;
+
+			x_dot_11 = -pass_freq1/Q_factor*x_11-pow(pass_freq1,2.0)*x_12+MoI_y_hat*angular_Accel.y;
+			x_dot_12 = x_11;
+			x_11 += x_dot_11*delta_t.count();
+			x_12 += x_dot_12*delta_t.count();
+			y_11 = pass_freq1/Q_factor*x_11;
+			double gradient_bias_x_c = vibration1*y_11;
+			x_grad_x_dot_1=-2.0*xy_cutoff_freq*x_grad_x_1-2.0*pow(xy_cutoff_freq,2)*x_grad_x_2-pow(xy_cutoff_freq,3)*x_grad_x_3+gradient_bias_x_c;
+			x_grad_x_dot_2=x_grad_x_1;
+			x_grad_x_dot_3=x_grad_x_2;
+			x_grad_x_1+=x_grad_x_dot_1*delta_t.count();
+			x_grad_x_2+=x_grad_x_dot_2*delta_t.count();
+			x_grad_x_3+=x_grad_x_dot_3*delta_t.count();
+			filtered_grad_x=pow(xy_cutoff_freq,3)*x_grad_x_3;
+			bias_x_c += filtered_grad_x*delta_t.count();
+			x_c_hat = x_c_init-G_XY*bias_x_c;
+			if(fabs(x_c_hat)>x_c_limit) x_c_hat = x_c_hat/fabs(x_c_hat)*x_c_limit;
 		
-		x_dot_11 = -pass_freq1/Q_factor*x_11-pow(pass_freq1,2.0)*x_12+MoI_y_hat*angular_Accel.y;
-		x_dot_12 = x_11;
-		x_11 += x_dot_11*delta_t.count();
-		x_12 += x_dot_12*delta_t.count();
-		y_11 = pass_freq1/Q_factor*x_11;
-		double gradient_bias_x_c = vibration1*y_11;
-		x_grad_x_dot_1=-2.0*xy_cutoff_freq*x_grad_x_1-2.0*pow(xy_cutoff_freq,2)*x_grad_x_2-pow(xy_cutoff_freq,3)*x_grad_x_3+gradient_bias_x_c;
-		x_grad_x_dot_2=x_grad_x_1;
-		x_grad_x_dot_3=x_grad_x_2;
-		x_grad_x_1+=x_grad_x_dot_1*delta_t.count();
-		x_grad_x_2+=x_grad_x_dot_2*delta_t.count();
-		x_grad_x_3+=x_grad_x_dot_3*delta_t.count();
-		filtered_grad_x=pow(xy_cutoff_freq,3)*x_grad_x_3;
-		bias_x_c += filtered_grad_x*delta_t.count();
-		x_c_hat = x_c_init-G_XY*bias_x_c;
-		if(fabs(x_c_hat)>x_c_limit) x_c_hat = x_c_hat/fabs(x_c_hat)*x_c_limit;
+			x_dot_21 = -pass_freq1/Q_factor*x_21-pow(pass_freq1,2.0)*x_22+MoI_x_hat*angular_Accel.x;
+			x_dot_22 = x_21;
+			x_21 += x_dot_21*delta_t.count();
+			x_22 += x_dot_22*delta_t.count();
+			y_21 = pass_freq1/Q_factor*x_21;
+			double gradient_bias_y_c =vibration1*y_21;
+			x_grad_y_dot_1=-2.0*xy_cutoff_freq*x_grad_y_1-2.0*pow(xy_cutoff_freq,2)*x_grad_y_2-pow(xy_cutoff_freq,3)*x_grad_y_3+gradient_bias_y_c;
+			x_grad_y_dot_2=x_grad_y_1;
+			x_grad_y_dot_3=x_grad_y_2;
+			x_grad_y_1+=x_grad_y_dot_1*delta_t.count();
+			x_grad_y_2+=x_grad_y_dot_2*delta_t.count();
+			x_grad_y_3+=x_grad_y_dot_3*delta_t.count();
+			filtered_grad_y=pow(xy_cutoff_freq,3)*x_grad_y_3;
+			bias_y_c += filtered_grad_y*delta_t.count();
+			y_c_hat = y_c_init+G_XY*bias_y_c;
+			if(fabs(y_c_hat)>y_c_limit) y_c_hat = y_c_hat/fabs(y_c_hat)*y_c_limit;
+		//}
+
+		//if(!z_c_convergence){
+			F_xd = F_xd + vibration2;
+			F_yd = F_yd + vibration2;
 		
-		x_dot_21 = -pass_freq1/Q_factor*x_21-pow(pass_freq1,2.0)*x_22+MoI_x_hat*angular_Accel.x;
-		x_dot_22 = x_21;
-		x_21 += x_dot_21*delta_t.count();
-		x_22 += x_dot_22*delta_t.count();
-		y_21 = pass_freq1/Q_factor*x_21;
-		double gradient_bias_y_c =vibration1*y_21;
-		x_grad_y_dot_1=-2.0*xy_cutoff_freq*x_grad_y_1-2.0*pow(xy_cutoff_freq,2)*x_grad_y_2-pow(xy_cutoff_freq,3)*x_grad_y_3+gradient_bias_y_c;
-		x_grad_y_dot_2=x_grad_y_1;
-		x_grad_y_dot_3=x_grad_y_2;
-		x_grad_y_1+=x_grad_y_dot_1*delta_t.count();
-		x_grad_y_2+=x_grad_y_dot_2*delta_t.count();
-		x_grad_y_3+=x_grad_y_dot_3*delta_t.count();
-		filtered_grad_y=pow(xy_cutoff_freq,3)*x_grad_y_3;
-		bias_y_c += filtered_grad_y*delta_t.count();
-		y_c_hat = y_c_init+G_XY*bias_y_c;
-		if(fabs(y_c_hat)>y_c_limit) y_c_hat = y_c_hat/fabs(y_c_hat)*y_c_limit;
-		
-		x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
-		x_dot_32 = x_31;
-		x_31 += x_dot_31*delta_t.count();
-		x_32 += x_dot_32*delta_t.count();
-		y_31 = pass_freq2/Q_factor*x_31;
-		double gradient_bias_z_c = vibration2*y_31;
-		x_grad_z_dot_1=-2.0*z_cutoff_freq*x_grad_z_1-2.0*pow(z_cutoff_freq,2)*x_grad_z_2-pow(z_cutoff_freq,3)*x_grad_z_3+gradient_bias_z_c;
-		x_grad_z_dot_2=x_grad_z_1;
-		x_grad_z_dot_3=x_grad_z_2;
-		x_grad_z_1+=x_grad_z_dot_1*delta_t.count();
-		x_grad_z_2+=x_grad_z_dot_2*delta_t.count();
-		x_grad_z_3+=x_grad_z_dot_3*delta_t.count();
-		filtered_grad_z=pow(z_cutoff_freq,3)*x_grad_z_3;
-		bias_z_c += filtered_grad_z*delta_t.count();
-		z_c_hat = z_c_init-G_Z*bias_z_c;
-		if(fabs(z_c_hat)>z_c_limit) z_c_hat = z_c_hat/fabs(z_c_hat)*z_c_limit;
-	 	
+			x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
+			x_dot_32 = x_31;
+			x_31 += x_dot_31*delta_t.count();
+			x_32 += x_dot_32*delta_t.count();
+			y_31 = pass_freq2/Q_factor*x_31;
+			double gradient_bias_z_c = vibration2*y_31;
+			x_grad_z_dot_1=-2.0*z_cutoff_freq*x_grad_z_1-2.0*pow(z_cutoff_freq,2)*x_grad_z_2-pow(z_cutoff_freq,3)*x_grad_z_3+gradient_bias_z_c;
+			x_grad_z_dot_2=x_grad_z_1;
+			x_grad_z_dot_3=x_grad_z_2;
+			x_grad_z_1+=x_grad_z_dot_1*delta_t.count();
+			x_grad_z_2+=x_grad_z_dot_2*delta_t.count();
+			x_grad_z_3+=x_grad_z_dot_3*delta_t.count();
+			filtered_grad_z=pow(z_cutoff_freq,3)*x_grad_z_3;
+			bias_z_c += filtered_grad_z*delta_t.count();
+			z_c_hat = z_c_init-G_Z*bias_z_c;
+			if(fabs(z_c_hat)>z_c_limit) z_c_hat = z_c_hat/fabs(z_c_hat)*z_c_limit;
+	 	//}
+
 		filtered_bias_gradient.x=filtered_grad_x;
 		filtered_bias_gradient.y=filtered_grad_y;
 		filtered_bias_gradient.z=filtered_grad_z;
@@ -806,7 +829,7 @@ void state_Reader(){
 					hovering=true;
 					hovering_force=hovering_force/hovering_count;
 					ROS_INFO("Hovering");
-					ROS_INFO("%lf",hovering_force);
+					ROS_INFO("Hovering force : %lf",hovering_force);
 				}
 			}
 			else{
@@ -815,14 +838,6 @@ void state_Reader(){
 				hovering_force = 0;
 			}
 		}
-	}
-	else{
-		// if(fabs(Z_d-pos.z)>0.1) {
-		// 	hovering=false;
-		// 	hovering_time_count = 0;
-		// 	hovering_count = 0;
-		// 	hovering_force = 0;
-		// }
 	}
 
 	if(!loading){
@@ -835,9 +850,12 @@ void state_Reader(){
 	 				loading = true;
 	 				loading_force=loading_force/loading_count;
 	 				ROS_INFO("Loading");
+					ROS_INFO("Loading force : %lf",loading_force);
 					ROS_INFO("Estimating CoM...");
 					tilt_mode = true;
 					ESC_control = true;
+					tilt_Pa=2.2;
+					tilt_Da=0.52;
 	 			}
 	 		}
 			else{
@@ -849,53 +867,57 @@ void state_Reader(){
 	}
 	else{
 		if(hovering){
-			if(!x_c_convergence && fabs(filtered_grad_x*1000)<0.2){
-				x_c_convergence_time_count+=delta_t.count();
-				if(x_c_convergence_time_count>10.0){
-					x_c_convergence = true;
-					ROS_INFO("x_c Estimation complete");
+			if(estimation_timer > 10.0){
+				if(!x_c_convergence && fabs(filtered_grad_x*1000)<0.1){
+					x_c_convergence_time_count+=delta_t.count();
+					if(x_c_convergence_time_count>7.0){
+						x_c_convergence = true;
+						ROS_INFO("x_c Estimation complete");
+					}
 				}
-			}
-			else{
-				x_c_convergence_time_count = 0;
-			}
-			if(!y_c_convergence && fabs(filtered_grad_y*1000)<0.2){
-				y_c_convergence_time_count+=delta_t.count();
-				if(y_c_convergence_time_count>10.0){
-					y_c_convergence = true;
-					ROS_INFO("y_c Estimation complete");
+				else{
+					x_c_convergence_time_count = 0;
 				}
-			}
-			else{
-				y_c_convergence_time_count= 0;
-			}
-			if(!z_c_convergence && fabs(filtered_grad_z*1000)<1.0){
-				z_c_convergence_time_count+=delta_t.count();
-				if(z_c_convergence_time_count>10.0){
-					z_c_convergence = true;
+				if(!y_c_convergence && fabs(filtered_grad_y*1000)<0.1){
+					y_c_convergence_time_count+=delta_t.count();
+					if(y_c_convergence_time_count>7.0){
+						y_c_convergence = true;
+						ROS_INFO("y_c Estimation complete");
+					}
 				}
-			}
-			else{
-				z_c_convergence_time_count = 0;
-			}
-		
-			if(x_c_convergence && y_c_convergence && z_c_convergence){
+				else{
+					y_c_convergence_time_count= 0;
+				}
+				if(!z_c_convergence && fabs(filtered_grad_z*1000)<0.5){
+					z_c_convergence_time_count+=delta_t.count();
+					if(z_c_convergence_time_count>7.0){
+						z_c_convergence = true;
+						ROS_INFO("z_c Estimation complete");
+					}
+				}
+				else{
+					z_c_convergence_time_count = 0;
+				}
+			}	
+			if(x_c_convergence && y_c_convergence && z_c_convergence && !estimating){
+				estimating = true;
 				ESC_control = false;
 				ROS_INFO("CoM Estimation complete");
 				ROS_INFO("x_c : %lf / y_c : %lf / z_c : %lf",x_c_hat, y_c_hat, z_c_hat);
+				ROS_INFO("Estimation time : %lf",estimation_timer);
+				estimation_timer=0;
+			}
+			else{
+				estimation_timer+=delta_t.count();
 			}
 		
-			if(fabs(F_zd-hovering_force)<0.5 && fabs(Z_d-pos.z)<0.02){
+			if(loading_force-F_zd<-2.0 && fabs(Z_d-pos.z)<0.02){
 				unloading_time_count+=delta_t.count();
-				if(unloading_time_count>1.0){
-					loading=false;
-					tilt_mode=false;
-					x_c_hat=x_c_init;
-					y_c_hat=y_c_init;
-					z_c_hat=z_c_init;
-					bias_x_c=0;
-					bias_y_c=0;
-					bias_z_c=0;
+				if(unloading_time_count>0.5){
+					state_init();
+					tilt_Pa=2.0;
+					tilt_Da=0.45;
+					ROS_INFO("UnLoading");
 				}
 			}
 			else{

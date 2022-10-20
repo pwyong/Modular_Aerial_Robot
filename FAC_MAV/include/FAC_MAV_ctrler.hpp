@@ -108,7 +108,8 @@ bool z_c_convergence = false;
 double x_c_convergence_time_count = 0;
 double y_c_convergence_time_count = 0;
 double z_c_convergence_time_count = 0;
-
+bool estimating = false;
+double estimation_timer = 0;
 //Thruster_cmd
 double F1 = 0;//desired propeller 1 force
 double F2 = 0;//desired propeller 2 force
@@ -391,7 +392,7 @@ geometry_msgs::Vector3 sine_wave;
 
 double MoI_x_hat = 0.01;
 double MoI_y_hat = 0.01;
-double G_XY = 0.5;
+double G_XY = 2.0;
 double G_Z = 0.5;
 
 double x_c_init = 0.0;
@@ -433,11 +434,11 @@ double y_31=0;
 double vibration1=0;
 double vibration2=0;
 double time_count=0;
-double Amp_XY=0.5;
-double Amp_Z=1.0;
+double Amp_XY=0.3;
+double Amp_Z=0.7;
 
 //gradient LPF - 3rd Butterworth
-double xy_cutoff_freq = 1.5;
+double xy_cutoff_freq = 0.5;
 double x_grad_x_dot_1=0;
 double x_grad_x_dot_2=0;
 double x_grad_x_dot_3=0;
@@ -471,6 +472,12 @@ double x_ay = 0;
 double accel_cutoff_freq = 5.0;
 //-----------------------------------------------------
 
+//Trajectory------------------------------------------
+double Amp = 0.5;
+double Tp = 4.0;
+double traj_timer = 0;
+bool trajectory_flag = false;
+//----------------------------------------------------
 template <class T>
 T map(T x, T in_min, T in_max, T out_min, T out_max){
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
@@ -593,3 +600,57 @@ void pwm_Calibration(){
 	else pwm_Kill();
 }
 
+void state_init(){
+	hovering = false;
+	loading = false;
+	tilt_mode = false;
+	x_c_convergence = false;
+	y_c_convergence = false;
+	z_c_convergence = false;
+	estimating = false;
+	ESC_control = false;
+	x_c_hat=x_c_init;
+	y_c_hat=y_c_init;
+	z_c_hat=z_c_init;
+	bias_x_c=0;
+	bias_y_c=0;
+	bias_z_c=0;
+	hovering_time_count=0;
+	loading_time_count=0;
+	x_c_convergence_time_count=0;
+	y_c_convergence_time_count=0;
+	z_c_convergence_time_count=0;
+	unloading_time_count=0;
+	hovering_force = 0;
+	loading_force = 0;
+	hovering_count = 0;
+	loading_count = 0;
+	X_d_base = pos.x;
+	Y_d_base = pos.y;
+	traj_timer = 0;
+	estimation_timer = 0;	
+
+	x_grad_x_dot_1=0;
+	x_grad_x_dot_2=0;
+	x_grad_x_dot_3=0;
+	x_grad_x_1=0;
+	x_grad_x_2=0;
+	x_grad_x_3=0;
+	filtered_grad_x=0;
+
+	x_grad_y_dot_1=0;
+	x_grad_y_dot_2=0;
+	x_grad_y_dot_3=0;
+	x_grad_y_1=0;
+	x_grad_y_2=0;
+	x_grad_y_3=0;
+	filtered_grad_y=0;
+
+	x_grad_z_dot_1=0;
+	x_grad_z_dot_2=0;
+	x_grad_z_dot_3=0;
+	x_grad_z_1=0;
+	x_grad_z_2=0;
+	x_grad_z_3=0;
+	filtered_grad_z=0;
+}
