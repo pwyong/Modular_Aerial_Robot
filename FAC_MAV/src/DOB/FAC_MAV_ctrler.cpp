@@ -134,6 +134,7 @@ int main(int argc, char **argv){
 	disturbance = nh.advertise<geometry_msgs::Vector3>("dhat",100);
 	linear_acceleration = nh.advertise<geometry_msgs::Vector3>("lin_acl",100);
 	bias_gradient = nh.advertise<geometry_msgs::Vector3>("bias_gradient",100);
+	filtered_bias_gradient = nh.advertise<geometry_msgs::Vector3>("filtered_bias_gradient",1);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -156,12 +157,7 @@ void publisherSet(){
 	start=std::chrono::high_resolution_clock::now();
 	// F << Eigen::MatrixXd::Identity(3,3), delta_t.count()*Eigen::MatrixXd::Identity(3,3),
 	// 	     Eigen::MatrixXd::Zero(3,3),                 Eigen::MatrixXd::Identity(3,3);
-	sine_wave_vibration();
-	setCM();
-	state_Reader();
-	angular_Accel.x = (imu_ang_vel.x-prev_angular_Vel.x)/delta_t.count();
-	angular_Accel.y = (imu_ang_vel.y-prev_angular_Vel.y)/delta_t.count();
-	angular_Accel.z = (imu_ang_vel.z-prev_angular_Vel.z)/delta_t.count();
+	//state_Reader();
 	if(!position_mode){
 		X_d_base=pos.x;
 		Y_d_base=pos.y;
@@ -230,7 +226,8 @@ void publisherSet(){
 	sine_wave_data.publish(sine_wave);
 	disturbance.publish(dhat);
 	linear_acceleration.publish(lin_acl);
-	bias_gradient.publish(filtered_bias_gradient);
+	bias_gradient.publish(bias_gradient_data);
+	filtered_bias_gradient.publish(filtered_bias_gradient_data);
 	prev_angular_Vel = imu_ang_vel;
 	prev_lin_vel = lin_vel;
 }
@@ -245,6 +242,7 @@ void setCM(){
 }
 
 void rpyT_ctrl() {
+	setCM();
 	pid_Gain_Setting();
 	y_d_tangent=y_vel_limit*(((double)Sbus[0]-(double)1500)/(double)500);
 	if(fabs(y_d_tangent)<y_d_tangent_deadzone || fabs(y_d_tangent)>y_vel_limit) y_d_tangent=0;
@@ -271,15 +269,18 @@ void rpyT_ctrl() {
 	x_ay+=x_ay_dot*delta_t.count();
 	lin_acl.y=accel_cutoff_freq*x_ay;
 	//ROS_INFO("%lf",time_count);
+	angular_Accel.x = (imu_ang_vel.x-prev_angular_Vel.x)/delta_t.count();
+	angular_Accel.y = (imu_ang_vel.y-prev_angular_Vel.y)/delta_t.count();
+	angular_Accel.z = (imu_ang_vel.z-prev_angular_Vel.z)/delta_t.count();
 
 	if(position_mode || velocity_mode){
 		if(position_mode){
-			if(!estimating){
+		/*	if(!estimating){
 				X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
 				Y_d = Y_d_base + XY_limit*(((double)Sbus[3]-(double)1500)/(double)500);
 				traj_timer = 0;
-			}
-			else{
+			}*/
+		//	else{
 				if(trajectory_flag){
 					X_d = X_d_base;
 					Y_d = Y_d_base+Amp-Amp*cos(2*pi/Tp*traj_timer);
@@ -294,7 +295,7 @@ void rpyT_ctrl() {
 					X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
 					Y_d = Y_d_base + XY_limit*(((double)Sbus[3]-(double)1500)/(double)500);
 				}
-			}
+		//	}
 			e_X = X_d - pos.x;
 			e_Y = Y_d - pos.y;
 			e_X_i += e_X * delta_t.count();
@@ -400,7 +401,7 @@ void rpyT_ctrl() {
 		//ROS_INFO("Manual Thrust!!");
 	}
 	if(F_zd > -0.5*mass*g) F_zd = -0.5*mass*g;
-	if(F_zd < -1.5*mass*g) F_zd = -1.5*mass*g;
+	if(F_zd < -2.0*mass*g) F_zd = -2.0*mass*g;
 	
 	//ESC-----------------------------------------------------
 	if(ESC_control){
@@ -409,7 +410,9 @@ void rpyT_ctrl() {
 	//--------------------------------------------------------
 
 	//DOB-----------------------------------------------------
-		//disturbance_Observer();
+	if(DOB_mode){
+	//	disturbance_Observer();
+	}
 	//--------------------------------------------------------
 	tautilde_r_d = tau_r_d - dhat_r;
 	tautilde_p_d = tau_p_d - dhat_p;
@@ -434,7 +437,7 @@ void ud_to_PWMs(double tau_r_des, double tau_p_des, double tau_y_des, double Thr
 	F_cmd = invCM*u;
 	if(!tilt_mode){
 		theta1_command = 0.0;
-        theta2_command = 0.0;
+	        theta2_command = 0.0;
 	}
 	//Tilting type
 	else {
@@ -557,19 +560,24 @@ void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array){
 		velocity_mode=false;
 		position_mode=true;
 	}
-
-	/*if(Sbus[8]>1500) tilt_mode=true;
+	
+	if(Sbus[8]>1500) tilt_mode=true;
 	else tilt_mode=false;
-	*/	
+		
+/*	if(Sbus[9]>1500) ESC_control=true;
+	else ESC_control=false;*/
+	
+	
 	if(Sbus[9]>1500) trajectory_flag=true;
 	else trajectory_flag=false;
+//	*/
 	
 }
 
 
 void batteryCallback(const std_msgs::Int16& msg){
 	int16_t value=msg.data;
-	voltage=value*3.3/(double)4096/(7440./(30000.+7440.));
+	voltage=value*3.3/(double)4096/(7300./(30000.+7300.));
 	double kv=0.08;
 	voltage=kv*voltage+(1-kv)*voltage_old;
 	voltage_old=voltage;
@@ -752,22 +760,20 @@ void sine_wave_vibration(){
 }
 
 void ESC_controller(){
-		//if(!x_c_convergence || !y_c_convergence){
+		sine_wave_vibration();
+		
+			
 			F_zd = F_zd + vibration1;
-
+			
 			x_dot_11 = -pass_freq1/Q_factor*x_11-pow(pass_freq1,2.0)*x_12+MoI_y_hat*angular_Accel.y;
 			x_dot_12 = x_11;
 			x_11 += x_dot_11*delta_t.count();
 			x_12 += x_dot_12*delta_t.count();
 			y_11 = pass_freq1/Q_factor*x_11;
 			double gradient_bias_x_c = vibration1*y_11;
-			x_grad_x_dot_1=-2.0*xy_cutoff_freq*x_grad_x_1-2.0*pow(xy_cutoff_freq,2)*x_grad_x_2-pow(xy_cutoff_freq,3)*x_grad_x_3+gradient_bias_x_c;
-			x_grad_x_dot_2=x_grad_x_1;
-			x_grad_x_dot_3=x_grad_x_2;
-			x_grad_x_1+=x_grad_x_dot_1*delta_t.count();
-			x_grad_x_2+=x_grad_x_dot_2*delta_t.count();
-			x_grad_x_3+=x_grad_x_dot_3*delta_t.count();
-			filtered_grad_x=pow(xy_cutoff_freq,3)*x_grad_x_3;
+			x_grad_x_dot=-xy_cutoff_freq*x_grad_x+gradient_bias_x_c;
+			x_grad_x+=x_grad_x_dot*delta_t.count();
+			filtered_grad_x=xy_cutoff_freq*x_grad_x;
 			bias_x_c += filtered_grad_x*delta_t.count();
 			x_c_hat = x_c_init-G_XY*bias_x_c;
 			if(fabs(x_c_hat)>x_c_limit) x_c_hat = x_c_hat/fabs(x_c_hat)*x_c_limit;
@@ -778,43 +784,39 @@ void ESC_controller(){
 			x_22 += x_dot_22*delta_t.count();
 			y_21 = pass_freq1/Q_factor*x_21;
 			double gradient_bias_y_c =vibration1*y_21;
-			x_grad_y_dot_1=-2.0*xy_cutoff_freq*x_grad_y_1-2.0*pow(xy_cutoff_freq,2)*x_grad_y_2-pow(xy_cutoff_freq,3)*x_grad_y_3+gradient_bias_y_c;
-			x_grad_y_dot_2=x_grad_y_1;
-			x_grad_y_dot_3=x_grad_y_2;
-			x_grad_y_1+=x_grad_y_dot_1*delta_t.count();
-			x_grad_y_2+=x_grad_y_dot_2*delta_t.count();
-			x_grad_y_3+=x_grad_y_dot_3*delta_t.count();
-			filtered_grad_y=pow(xy_cutoff_freq,3)*x_grad_y_3;
+			x_grad_y_dot=-xy_cutoff_freq*x_grad_y+gradient_bias_y_c;
+			x_grad_y+=x_grad_y_dot*delta_t.count();
+			filtered_grad_y=xy_cutoff_freq*x_grad_y;
 			bias_y_c += filtered_grad_y*delta_t.count();
 			y_c_hat = y_c_init+G_XY*bias_y_c;
 			if(fabs(y_c_hat)>y_c_limit) y_c_hat = y_c_hat/fabs(y_c_hat)*y_c_limit;
-		//}
-
+		
+		//	*/
 		//if(!z_c_convergence){
-			F_xd = F_xd + vibration2;
+			//F_xd = F_xd + vibration2;
 			F_yd = F_yd + vibration2;
 		
-			x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+(MoI_x_hat*angular_Accel.x-MoI_y_hat*angular_Accel.y);
+			x_dot_31 = -pass_freq2/Q_factor*x_31-pow(pass_freq2,2.0)*x_32+MoI_x_hat*angular_Accel.x;
 			x_dot_32 = x_31;
 			x_31 += x_dot_31*delta_t.count();
 			x_32 += x_dot_32*delta_t.count();
 			y_31 = pass_freq2/Q_factor*x_31;
 			double gradient_bias_z_c = vibration2*y_31;
-			x_grad_z_dot_1=-2.0*z_cutoff_freq*x_grad_z_1-2.0*pow(z_cutoff_freq,2)*x_grad_z_2-pow(z_cutoff_freq,3)*x_grad_z_3+gradient_bias_z_c;
-			x_grad_z_dot_2=x_grad_z_1;
-			x_grad_z_dot_3=x_grad_z_2;
-			x_grad_z_1+=x_grad_z_dot_1*delta_t.count();
-			x_grad_z_2+=x_grad_z_dot_2*delta_t.count();
-			x_grad_z_3+=x_grad_z_dot_3*delta_t.count();
-			filtered_grad_z=pow(z_cutoff_freq,3)*x_grad_z_3;
+			x_grad_z_dot=-z_cutoff_freq*x_grad_z+gradient_bias_z_c;
+			x_grad_z+=x_grad_z_dot*delta_t.count();
+			filtered_grad_z=z_cutoff_freq*x_grad_z;
 			bias_z_c += filtered_grad_z*delta_t.count();
 			z_c_hat = z_c_init-G_Z*bias_z_c;
 			if(fabs(z_c_hat)>z_c_limit) z_c_hat = z_c_hat/fabs(z_c_hat)*z_c_limit;
 	 	//}
 
-		filtered_bias_gradient.x=filtered_grad_x;
-		filtered_bias_gradient.y=filtered_grad_y;
-		filtered_bias_gradient.z=filtered_grad_z;
+		bias_gradient_data.x=gradient_bias_x_c;
+		bias_gradient_data.y=gradient_bias_y_c;
+		bias_gradient_data.z=gradient_bias_z_c;
+
+		filtered_bias_gradient_data.x=filtered_grad_x;
+		filtered_bias_gradient_data.y=filtered_grad_y;
+		filtered_bias_gradient_data.z=filtered_grad_z;
 		//ROS_INFO("ESC");
 }
 
@@ -842,20 +844,22 @@ void state_Reader(){
 
 	if(!loading){
 	 	if(hovering){
-	 		if(F_zd-hovering_force<-2.0 && fabs(Z_d-pos.z)<0.02){
+	 		if(F_zd-hovering_force<-2.0 && fabs(Z_d-pos.z)<0.02 && fabs(r_d-imu_rpy.x)<0.05 && fabs(p_d-imu_rpy.y)<0.05){
 	 			loading_time_count+=delta_t.count();
 				loading_force+=F_zd;
 				loading_count++;
 	 			if(loading_time_count>2.0){
 	 				loading = true;
 	 				loading_force=loading_force/loading_count;
+					//double F_gap = hovering_force-loading_force;
+					//double F_gapmax = hovering_force -(-1.5*mass*g); 
 	 				ROS_INFO("Loading");
 					ROS_INFO("Loading force : %lf",loading_force);
 					ROS_INFO("Estimating CoM...");
 					tilt_mode = true;
 					ESC_control = true;
-					tilt_Pa=2.2;
-					tilt_Da=0.52;
+					//DOB_mode=true;
+					
 	 			}
 	 		}
 			else{
@@ -867,35 +871,47 @@ void state_Reader(){
 	}
 	else{
 		if(hovering){
-			if(estimation_timer > 10.0){
+			if(estimation_timer > 30.0){
 				if(!x_c_convergence && fabs(filtered_grad_x*1000)<0.1){
 					x_c_convergence_time_count+=delta_t.count();
-					if(x_c_convergence_time_count>7.0){
+					if(x_c_convergence_time_count>7.5){
 						x_c_convergence = true;
 						ROS_INFO("x_c Estimation complete");
 					}
 				}
 				else{
+					if(x_c_convergence && fabs(filtered_grad_x*1000)>0.2){
+						x_c_convergence = false;
+						ROS_INFO("x_c yet");
+					}
 					x_c_convergence_time_count = 0;
 				}
 				if(!y_c_convergence && fabs(filtered_grad_y*1000)<0.1){
 					y_c_convergence_time_count+=delta_t.count();
-					if(y_c_convergence_time_count>7.0){
+					if(y_c_convergence_time_count>7.5){
 						y_c_convergence = true;
 						ROS_INFO("y_c Estimation complete");
 					}
 				}
 				else{
+					if(y_c_convergence && fabs(filtered_grad_y*1000)>0.2){
+						y_c_convergence = false;
+						ROS_INFO("y_c yet");
+					}
 					y_c_convergence_time_count= 0;
 				}
-				if(!z_c_convergence && fabs(filtered_grad_z*1000)<0.5){
+				if(!z_c_convergence && fabs(filtered_grad_z*1000)<0.1){
 					z_c_convergence_time_count+=delta_t.count();
-					if(z_c_convergence_time_count>7.0){
+					if(z_c_convergence_time_count>7.5){
 						z_c_convergence = true;
 						ROS_INFO("z_c Estimation complete");
 					}
 				}
 				else{
+					if(z_c_convergence && fabs(filtered_grad_z*1000)>0.2){
+						z_c_convergence = false;
+						ROS_INFO("z_c yet");
+					}
 					z_c_convergence_time_count = 0;
 				}
 			}	
@@ -906,6 +922,8 @@ void state_Reader(){
 				ROS_INFO("x_c : %lf / y_c : %lf / z_c : %lf",x_c_hat, y_c_hat, z_c_hat);
 				ROS_INFO("Estimation time : %lf",estimation_timer);
 				estimation_timer=0;
+				tilt_Ia=0.1;
+				tilt_Dp=1.0;
 			}
 			else{
 				estimation_timer+=delta_t.count();
@@ -915,8 +933,6 @@ void state_Reader(){
 				unloading_time_count+=delta_t.count();
 				if(unloading_time_count>0.5){
 					state_init();
-					tilt_Pa=2.0;
-					tilt_Da=0.45;
 					ROS_INFO("UnLoading");
 				}
 			}

@@ -76,7 +76,8 @@ std_msgs::Float32 altitude_d;
 std_msgs::Float32 battery_voltage_msg;
 std_msgs::Float32 battery_real_voltage;
 std_msgs::Float32 dt;
-geometry_msgs::Vector3 filtered_bias_gradient;
+geometry_msgs::Vector3 bias_gradient_data;
+geometry_msgs::Vector3 filtered_bias_gradient_data;
 
 bool servo_sw=false;
 double theta1_command, theta2_command;
@@ -91,6 +92,7 @@ bool kill_mode = true;
 bool altitude_mode = false;
 bool tilt_mode = false;
 bool ESC_control = false;
+bool DOB_mode = false;
 
 //State
 bool hovering = false;
@@ -196,7 +198,7 @@ static double g = 9.80665;//(m/s^2)
 static double rp_limit = 0.3;//(rad)
 static double y_vel_limit = 0.01;//(rad/s)
 static double y_d_tangent_deadzone = (double)0.05 * y_vel_limit;//(rad/s)
-static double T_limit = 17;//(N)
+static double T_limit = 21;//(N)
 static double altitude_limit = 1;//(m)
 static double XY_limit = 0.5;
 static double XYZ_dot_limit=1;
@@ -271,11 +273,11 @@ double voltage_old=16.0;
 
 //-DOB----------------------------------------------------
 geometry_msgs::Vector3 dhat;
-double fq_cutoff=1.0;//Q filter Cut-off frequency
+double fq_cutoff=5.0;//Q filter Cut-off frequency
 
 // Nominal MoI
-double J_x = 0.01;
-double J_y = 0.01;
+double J_x = 0.001;
+double J_y = 0.001;
 double J_z = 0.1;
 
 //Roll DOB
@@ -358,6 +360,7 @@ ros::Publisher sine_wave_data;
 ros::Publisher disturbance;
 ros::Publisher linear_acceleration;
 ros::Publisher bias_gradient;
+ros::Publisher filtered_bias_gradient;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
@@ -390,14 +393,14 @@ geometry_msgs::Vector3 angular_Accel;
 geometry_msgs::Vector3 CoM;
 geometry_msgs::Vector3 sine_wave;
 
-double MoI_x_hat = 0.01;
-double MoI_y_hat = 0.01;
-double G_XY = 2.0;
-double G_Z = 0.5;
+double MoI_x_hat = 0.005;
+double MoI_y_hat = 0.005;
+double G_XY = 0.3;
+double G_Z = 1.0;
 
 double x_c_init = 0.0;
 double y_c_init = 0.0;
-double z_c_init = -0.04;
+double z_c_init = 0.0;
 double bias_x_c = 0;
 double bias_y_c = 0;
 double bias_z_c = 0;
@@ -406,9 +409,9 @@ double y_c_limit = 0.04;
 double z_c_limit = 0.1;
 
 //Bandpass filter parameter
-double Q_factor=10;
-double pass_freq1=3.0;
-double pass_freq2=5.0;
+double Q_factor=20.0;
+double pass_freq1=5.0;
+double pass_freq2=3.0;
 
 //Filter1
 double x_11=0;
@@ -434,34 +437,22 @@ double y_31=0;
 double vibration1=0;
 double vibration2=0;
 double time_count=0;
-double Amp_XY=0.3;
-double Amp_Z=0.7;
+double Amp_XY=1.0;
+double Amp_Z=1.0;
 
-//gradient LPF - 3rd Butterworth
-double xy_cutoff_freq = 0.5;
-double x_grad_x_dot_1=0;
-double x_grad_x_dot_2=0;
-double x_grad_x_dot_3=0;
-double x_grad_x_1=0;
-double x_grad_x_2=0;
-double x_grad_x_3=0;
+//gradient LPF
+double xy_cutoff_freq = 0.2;
+double x_grad_x_dot=0;
+double x_grad_x=0;
 double filtered_grad_x=0;
 
-double x_grad_y_dot_1=0;
-double x_grad_y_dot_2=0;
-double x_grad_y_dot_3=0;
-double x_grad_y_1=0;
-double x_grad_y_2=0;
-double x_grad_y_3=0;
+double x_grad_y_dot=0;
+double x_grad_y=0;
 double filtered_grad_y=0;
 
-double z_cutoff_freq = 2.5;
-double x_grad_z_dot_1=0;
-double x_grad_z_dot_2=0;
-double x_grad_z_dot_3=0;
-double x_grad_z_1=0;
-double x_grad_z_2=0;
-double x_grad_z_3=0;
+double z_cutoff_freq = 0.2;
+double x_grad_z_dot=0;
+double x_grad_z=0;
 double filtered_grad_z=0;
 //-----------------------------------------------------
 //Accelerometer LPF------------------------------------
@@ -473,8 +464,8 @@ double accel_cutoff_freq = 5.0;
 //-----------------------------------------------------
 
 //Trajectory------------------------------------------
-double Amp = 0.5;
-double Tp = 4.0;
+double Amp = 1.5;
+double Tp = 7.0;
 double traj_timer = 0;
 bool trajectory_flag = false;
 //----------------------------------------------------
@@ -482,7 +473,6 @@ template <class T>
 T map(T x, T in_min, T in_max, T out_min, T out_max){
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
-
 int32_t pwmMapping(double pwm){
 	return (int32_t)(65535.*pwm/(1./pwm_freq*1000000.));
 }
@@ -629,28 +619,34 @@ void state_init(){
 	Y_d_base = pos.y;
 	traj_timer = 0;
 	estimation_timer = 0;	
+	DOB_mode=false;
 
-	x_grad_x_dot_1=0;
-	x_grad_x_dot_2=0;
-	x_grad_x_dot_3=0;
-	x_grad_x_1=0;
-	x_grad_x_2=0;
-	x_grad_x_3=0;
+	x_grad_x_dot=0;
+	x_grad_x=0;
 	filtered_grad_x=0;
 
-	x_grad_y_dot_1=0;
-	x_grad_y_dot_2=0;
-	x_grad_y_dot_3=0;
-	x_grad_y_1=0;
-	x_grad_y_2=0;
-	x_grad_y_3=0;
+	x_grad_y_dot=0;
+	x_grad_y=0;
 	filtered_grad_y=0;
 
-	x_grad_z_dot_1=0;
-	x_grad_z_dot_2=0;
-	x_grad_z_dot_3=0;
-	x_grad_z_1=0;
-	x_grad_z_2=0;
-	x_grad_z_3=0;
+	x_grad_z_dot=0;
+	x_grad_z=0;
 	filtered_grad_z=0;
+	time_count=0;
+
+	x_dot_11=0;
+	x_dot_12=0;
+	x_11=0;
+	x_12=0;
+	y_11=0;
+	x_dot_21=0;
+	x_dot_22=0;
+	x_21=0;
+	x_22=0;
+	y_21=0;
+	x_dot_31=0;
+	x_dot_32=0;
+	x_31=0;
+	x_32=0;
+	y_31=0;
 }
