@@ -54,7 +54,7 @@
 	<!--Center of mass-->
 	<param name="x_center_of_mass"		value="-0.01"/>	
 	<param name="y_center_of_mass"		value="0.003"/>	
-	<param name="z_center_of_mass"		value="0.01"/> <!-- -0.058-->	
+	<param name="z_center_of_mass"		value="-0.039"/> <!-- -0.058-->	
 
 	<!--Conventional flight mode-->
     		<!--Conventional Mode attitude_rp gains-->
@@ -110,6 +110,8 @@
 
     <node name="FAC_MAV_DOB_node"  pkg="FAC_MAV" type="FAC_MAV_DOB_ctrler"  output="screen"/>
 
+    <node pkg="data_logging" name="data_logging_node" type="data_logging"/>
+
     <!-- Rosbag -->
-    <node pkg="rosbag" type="record" name="record" output="screen" args="-o /home/pwyong/Desktop/catkin_ws/src/FAC_MAV/bag/ -a" /><!-- /angle /desired_angle /Forces /t265_pos /desired_altitude"/> -->
+    <node pkg="rosbag" type="record" name="record" output="screen" args="-o /home/pwyong/Desktop/catkin_ws/src/FAC_MAV/bag/ /data_log" /><!-- /angle /desired_angle /Forces /t265_pos /desired_altitude"/> -->
 </launch>
