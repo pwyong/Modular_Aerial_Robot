@@ -192,7 +192,7 @@ static double b_over_k_ratio = 0.01;//F_i=k*(omega_i)^2, M_i=b*(omega_i)^2
 
 //General parameters======================================
 
-static double pi = 3.141592;//(rad)
+static double PI = 3.141592;//(rad)
 static double g = 9.80665;//(m/s^2)
 
 static double rp_limit = 0.3;//(rad)
@@ -273,11 +273,11 @@ double voltage_old=16.0;
 
 //-DOB----------------------------------------------------
 geometry_msgs::Vector3 dhat;
-double fq_cutoff=5.0;//Q filter Cut-off frequency
+double fq_cutoff=2.0;//Q filter Cut-off frequency
 
 // Nominal MoI
-double J_x = 0.001;
-double J_y = 0.001;
+double J_x = 0.005;
+double J_y = 0.005;
 double J_z = 0.1;
 
 //Roll DOB
@@ -395,7 +395,7 @@ geometry_msgs::Vector3 sine_wave;
 
 double MoI_x_hat = 0.005;
 double MoI_y_hat = 0.005;
-double G_XY = 0.3;
+double G_XY = 0.2;
 double G_Z = 1.0;
 
 double x_c_init = 0.0;
@@ -464,8 +464,8 @@ double accel_cutoff_freq = 5.0;
 //-----------------------------------------------------
 
 //Trajectory------------------------------------------
-double Amp = 1.5;
-double Tp = 7.0;
+double Amp = 0.5;
+double Tp = 5.0;
 double traj_timer = 0;
 bool trajectory_flag = false;
 //----------------------------------------------------

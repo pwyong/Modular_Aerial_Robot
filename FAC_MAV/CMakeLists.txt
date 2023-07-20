@@ -17,13 +17,15 @@ find_package(catkin REQUIRED COMPONENTS
   tf2
   tf2_ros
 )
-
+#link_directories("~/Desktop/casadi/casadi/build/lib")
 ## System dependencies are found with CMake's conventions
 find_package(cmake_modules REQUIRED)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 find_package(Eigen REQUIRED)
 include_directories(${Eigen_INCLUDE_DIRS})
-
+find_package(casadi REQUIRED)
+include_directories(${casadi_INCLUDE_DIRS})
+#add_definitions(-D_GLIBCXX_USE_CXX11_ABI=0)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -177,6 +179,7 @@ target_link_libraries(FAC_MAV_GUI_ctrler
 target_link_libraries(FAC_MAV_DOB_ctrler
   ${catkin_LIBRARIES}
   ${Eigen_LIBRARIES}
+  casadi
 )
 
 #############
@@ -232,4 +235,4 @@ target_link_libraries(FAC_MAV_DOB_ctrler
 # endif()
 
 ## Add folders to be run by python nosetests
-# catkin_add_nosetests(test)
+## catkin_add_nosetests(test)

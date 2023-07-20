@@ -5,7 +5,49 @@
 //2022.09.21 Controller mode selection Application
 
 #include "FAC_MAV_ctrler.hpp"
+#include <casadi/casadi.hpp>
+#include "DoubleLinkedList.h"
+#include <vector>
+#include <algorithm>
+using namespace casadi;
 
+// MHE
+int N_MHE=10;
+int n_states=18;
+int n_controls=6;
+int n_outputs=12;
+//SX MHE_X = SX::sym("X",n_states);  //{x, y, z, x_dot, y_dot, z_dot, roll, pitch, yaw, omega_x, omega_y, omega_z, F_ex, F_ey, F_ez, tau_ex, tau_ey, tau_ez}
+//SX MHE_U = SX::sym("U",n_controls); //{F_x, F_y, F_z, tau_x, tau_y, tau_z}
+//SX MHE_X_dot = SX::sym("X_dot",n_states); 
+//SX MHE_Y = SX::sym("Y",n_outputs);
+DM MHE_control_inputs = DM::zeros(n_controls,N_MHE);
+DM MHE_measurements = DM::zeros(n_outputs,N_MHE+1);
+double Jxx=0.005; double Jyy=0.005; double Jzz=0.01;
+
+MX f(const MX& x, const MX& u);
+MX h(const MX& x);
+
+Slice all_elem;
+DM MHE_X_star=DM::zeros(n_states,N_MHE+1);
+
+DoubleLinkedList measurement_x;
+DoubleLinkedList measurement_y;
+DoubleLinkedList measurement_z;
+DoubleLinkedList measurement_x_dot;
+DoubleLinkedList measurement_y_dot;
+DoubleLinkedList measurement_z_dot;
+DoubleLinkedList measurement_roll;
+DoubleLinkedList measurement_pitch;
+DoubleLinkedList measurement_yaw;
+DoubleLinkedList measurement_omega_x;
+DoubleLinkedList measurement_omega_y;
+DoubleLinkedList measurement_omega_z;
+DoubleLinkedList control_input_F_x;
+DoubleLinkedList control_input_F_y;
+DoubleLinkedList control_input_F_z;
+DoubleLinkedList control_input_tau_x;
+DoubleLinkedList control_input_tau_y;
+DoubleLinkedList control_input_tau_z;
 //Function-----------------------------------------------
 void publisherSet();
 void setCM();
@@ -26,6 +68,10 @@ void disturbance_Observer();
 void sine_wave_vibration();
 void ESC_controller();
 void state_Reader();
+//void MHE_model_setting();
+void MHE_nlp_setting();
+void MHE_external_force_estimation();
+void get_MHE_measurement_control_input();
 //-------------------------------------------------------
 
 int main(int argc, char **argv){
@@ -106,7 +152,9 @@ int main(int argc, char **argv){
 			tilt_Dp=nh.param<double>("tilt_position_D_gain",5.0);
 
 	//----------------------------------------------------------
-	
+	//MHE setting-----------------------------------------------
+//		MHE_nlp_setting();
+	//----------------------------------------------------------
 	//Set Control Matrix----------------------------------------
 		setCM();
         F_cmd << 0, 0, 0, 0;
@@ -120,7 +168,7 @@ int main(int argc, char **argv){
 	Forces = nh.advertise<std_msgs::Float32MultiArray>("Forces",100); // F 1,2,3,4
 	desired_torque = nh.advertise<geometry_msgs::Vector3>("torque_d",100);
 	linear_velocity = nh.advertise<geometry_msgs::Vector3>("lin_vel",100);
-	angular_velocity = nh.advertise<geometry_msgs::Vector3>("gyro",100);
+	angular_velocity = nh.advertise<geometry_msgs::Vector3>("angular_velocity",100);
 	desired_position = nh.advertise<geometry_msgs::Vector3>("pos_d",100);
 	position = nh.advertise<geometry_msgs::Vector3>("pos",100);
 	desired_force = nh.advertise<geometry_msgs::Vector3>("force_d",100);
@@ -131,7 +179,7 @@ int main(int argc, char **argv){
 	Center_of_Mass = nh.advertise<geometry_msgs::Vector3>("Center_of_Mass",100);
 	angular_Acceleration = nh.advertise<geometry_msgs::Vector3>("ang_accel",100);
 	sine_wave_data = nh.advertise<geometry_msgs::Vector3>("sine_wave",100);
-	disturbance = nh.advertise<geometry_msgs::Vector3>("dhat",100);
+	disturbance = nh.advertise<geometry_msgs::Vector3>("att_dhat",100);
 	linear_acceleration = nh.advertise<geometry_msgs::Vector3>("lin_acl",100);
 	bias_gradient = nh.advertise<geometry_msgs::Vector3>("bias_gradient",100);
 	filtered_bias_gradient = nh.advertise<geometry_msgs::Vector3>("filtered_bias_gradient",1);
@@ -157,7 +205,9 @@ void publisherSet(){
 	start=std::chrono::high_resolution_clock::now();
 	// F << Eigen::MatrixXd::Identity(3,3), delta_t.count()*Eigen::MatrixXd::Identity(3,3),
 	// 	     Eigen::MatrixXd::Zero(3,3),                 Eigen::MatrixXd::Identity(3,3);
-	//state_Reader();
+//	state_Reader();
+	MHE_external_force_estimation();
+	get_MHE_measurement_control_input();
 	if(!position_mode){
 		X_d_base=pos.x;
 		Y_d_base=pos.y;
@@ -188,6 +238,7 @@ void publisherSet(){
 		pwm_Kill();	
 	}
 	else{
+		
 		rpyT_ctrl();		
 	}
 	
@@ -206,6 +257,8 @@ void publisherSet(){
 	CoM.x = x_c_hat;
 	CoM.y = y_c_hat;
 	CoM.z = z_c_hat;
+	dhat.x = dhat_r;
+	dhat.y = dhat_p;
 	PWMs.publish(PWMs_cmd);
 	euler.publish(imu_rpy);
 	desired_angle.publish(angle_d);
@@ -222,6 +275,7 @@ void publisherSet(){
 	delta_time.publish(dt);
 	desired_velocity.publish(desired_lin_vel);
 	Center_of_Mass.publish(CoM);
+	angular_velocity.publish(imu_ang_vel);
 	angular_Acceleration.publish(angular_Accel);
 	sine_wave_data.publish(sine_wave);
 	disturbance.publish(dhat);
@@ -234,11 +288,16 @@ void publisherSet(){
 
 void setCM(){
 	//Co-rotating type
-	CM <<          (l_servo+z_c_hat)*sin(theta1)+y_c_hat*cos(theta1),  (r_arm+y_c_hat)*cos(theta2)+b_over_k_ratio*sin(theta2),       (l_servo+z_c_hat)*sin(theta1)+y_c_hat*cos(theta1), -(r_arm-y_c_hat)*cos(theta2)+b_over_k_ratio*sin(theta2),
+/*	CM <<          (l_servo+z_c_hat)*sin(theta1)+y_c_hat*cos(theta1),  (r_arm+y_c_hat)*cos(theta2)+b_over_k_ratio*sin(theta2),       (l_servo+z_c_hat)*sin(theta1)+y_c_hat*cos(theta1), -(r_arm-y_c_hat)*cos(theta2)+b_over_k_ratio*sin(theta2),
               (r_arm-x_c_hat)*cos(theta1)+b_over_k_ratio*sin(theta1),      (-l_servo+z_c_hat)*sin(theta2)-x_c_hat*cos(theta2), -(r_arm+x_c_hat)*cos(theta1)+b_over_k_ratio*sin(theta1),      (-l_servo+z_c_hat)*sin(theta2)-x_c_hat*cos(theta2),
               (r_arm-x_c_hat)*sin(theta1)-b_over_k_ratio*cos(theta1), -(r_arm+y_c_hat)*sin(theta2)+b_over_k_ratio*cos(theta2), -(r_arm+x_c_hat)*sin(theta1)-b_over_k_ratio*cos(theta1),  (r_arm-y_c_hat)*sin(theta2)+b_over_k_ratio*cos(theta2),
                                                         -cos(theta1),                                            -cos(theta2),                                            -cos(theta1),                                            -cos(theta2);
-    	invCM = CM.inverse();
+    
+*/	CM <<          (l_servo+z_c_hat)*sin(theta1)+y_c_hat*cos(theta1),  (r_arm+y_c_hat)*cos(theta2)+b_over_k_ratio*sin(theta2),       (l_servo+z_c_hat)*sin(theta1)+y_c_hat*cos(theta1), -(r_arm-y_c_hat)*cos(theta2)+b_over_k_ratio*sin(theta2),
+              (r_arm-x_c_hat)*cos(theta1)+b_over_k_ratio*sin(theta1),      (-l_servo+z_c_hat)*sin(theta2)-x_c_hat*cos(theta2), -(r_arm+x_c_hat)*cos(theta1)+b_over_k_ratio*sin(theta1),      (-l_servo+z_c_hat)*sin(theta2)-x_c_hat*cos(theta2),
+              -b_over_k_ratio*cos(theta1), b_over_k_ratio*cos(theta2), -b_over_k_ratio*cos(theta1),  b_over_k_ratio*cos(theta2),
+                                                        -cos(theta1),                                            -cos(theta2),                                            -cos(theta1),                                            -cos(theta2);
+	invCM = CM.inverse();
 }
 
 void rpyT_ctrl() {
@@ -282,8 +341,8 @@ void rpyT_ctrl() {
 			}*/
 		//	else{
 				if(trajectory_flag){
-					X_d = X_d_base;
-					Y_d = Y_d_base+Amp-Amp*cos(2*pi/Tp*traj_timer);
+					X_d = X_d_base+Amp-Amp*cos(2*PI/Tp*traj_timer);
+					Y_d = Y_d_base+Amp*sin(2*PI/Tp*traj_timer);
 					traj_timer+=delta_t.count();
 				}
 				else{
@@ -404,14 +463,30 @@ void rpyT_ctrl() {
 	if(F_zd < -2.0*mass*g) F_zd = -2.0*mass*g;
 	
 	//ESC-----------------------------------------------------
-	if(ESC_control){
-		ESC_controller();
-	}
+	//if(ESC_control){
+	//	ESC_controller();
+	//}
 	//--------------------------------------------------------
 
 	//DOB-----------------------------------------------------
 	if(DOB_mode){
-	//	disturbance_Observer();
+		disturbance_Observer();
+	}
+	else{
+	    	x_r1 = 0.0; 
+		x_r2 = 0.0; 
+		x_r3 = 0.0;
+		y_r1 = 0.0;
+		y_r2 = 0.0;
+		y_r3 = 0.0;
+		x_p1 = 0.0;
+		x_p2 = 0.0;
+		x_p3 = 0.0;
+		y_p1 = 0.0;
+		y_p2 = 0.0;
+		y_p3 = 0.0;
+		dhat_r = 0.0;
+		dhat_p = 0.0; 
 	}
 	//--------------------------------------------------------
 	tautilde_r_d = tau_r_d - dhat_r;
@@ -508,9 +583,9 @@ void imu_Callback(const sensor_msgs::Imu& msg){
     	// TP attitude - Euler representation
     	tf::Matrix3x3(quat).getRPY(imu_rpy.x,imu_rpy.y,imu_rpy.z);
 	base_yaw = cam_att(2);
-    	if(base_yaw - yaw_prev < -pi) yaw_rotate_count++;
-	else if(base_yaw - yaw_prev > pi) yaw_rotate_count--;
-	yaw_now = base_yaw+2*pi*yaw_rotate_count;
+    	if(base_yaw - yaw_prev < -PI) yaw_rotate_count++;
+	else if(base_yaw - yaw_prev > PI) yaw_rotate_count--;
+	yaw_now = base_yaw+2*PI*yaw_rotate_count;
 	//ROS_INFO("now : %lf / prev : %lf / count : %d",yaw_now, yaw_prev, yaw_rotate_count);
 	imu_rpy.z = yaw_now;
 	yaw_prev = base_yaw;
@@ -564,12 +639,12 @@ void sbusCallback(const std_msgs::Int16MultiArray::ConstPtr& array){
 	if(Sbus[8]>1500) tilt_mode=true;
 	else tilt_mode=false;
 		
-/*	if(Sbus[9]>1500) ESC_control=true;
-	else ESC_control=false;*/
+	if(Sbus[9]>1500) DOB_mode=true;
+	else DOB_mode=false;
 	
 	
-	if(Sbus[9]>1500) trajectory_flag=true;
-	else trajectory_flag=false;
+//	if(Sbus[9]>1500) trajectory_flag=true;
+//	else trajectory_flag=false;
 //	*/
 	
 }
@@ -612,19 +687,19 @@ void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg){
 	tf::quaternionMsgToTF(rot,quat);
 	tf::Matrix3x3(quat).getRPY(cam_att(0),cam_att(1),cam_att(2));
 	cam_v << t265_lin_vel.x, t265_lin_vel.y, t265_lin_vel.z;
-	R_v << cos(pi/2.), -sin(pi/2.),  0.,
- 	       sin(pi/2.),  cos(pi/2.),  0.,
+	R_v << cos(PI/2.), -sin(PI/2.),  0.,
+ 	       sin(PI/2.),  cos(PI/2.),  0.,
 	                0.,           0.,  1.;
 
 	v = R_v*cam_v;
 
-	double global_X_dot = v(2)*(sin(imu_rpy.x)*sin(imu_rpy.z)+cos(imu_rpy.x)*cos(imu_rpy.z)*sin(imu_rpy.y))-v(1)*(cos(imu_rpy.x)*sin(imu_rpy.z)-cos(imu_rpy.z)*sin(imu_rpy.x)*sin(imu_rpy.y))+v(0)*cos(imu_rpy.z)*cos(imu_rpy.y);
-	double global_Y_dot = v(1)*(cos(imu_rpy.x)*cos(imu_rpy.z)+sin(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))-v(2)*(cos(imu_rpy.z)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.z)*sin(imu_rpy.y))+v(0)*cos(imu_rpy.y)*sin(imu_rpy.z);
+	double global_X_dot = v(2)*(sin(imu_rpy.x)*sin(imu_rpy.z-PI/4.0)+cos(imu_rpy.x)*cos(imu_rpy.z-PI/4.0)*sin(imu_rpy.y))-v(1)*(cos(imu_rpy.x)*sin(imu_rpy.z-PI/4.0)-cos(imu_rpy.z-PI/4.0)*sin(imu_rpy.x)*sin(imu_rpy.y))+v(0)*cos(imu_rpy.z-PI/4.0)*cos(imu_rpy.y);
+	double global_Y_dot = v(1)*(cos(imu_rpy.x)*cos(imu_rpy.z-PI/4.0)+sin(imu_rpy.x)*sin(imu_rpy.z-PI/4.0)*sin(imu_rpy.y))-v(2)*(cos(imu_rpy.z-PI/4.0)*sin(imu_rpy.x)-cos(imu_rpy.x)*sin(imu_rpy.z-PI/4.0)*sin(imu_rpy.y))+v(0)*cos(imu_rpy.y)*sin(imu_rpy.z-PI/4.0);
 	double global_Z_dot = -v(0)*sin(imu_rpy.y)+v(2)*cos(imu_rpy.x)*cos(imu_rpy.y)+v(1)*cos(imu_rpy.y)*sin(imu_rpy.x);
 
-	lin_vel.x=v(0);//global_X_dot;
-	lin_vel.y=v(1);//global_Y_dot;
-	lin_vel.z=v(2);//global_Z_dot;
+	lin_vel.x=global_X_dot;
+	lin_vel.y=global_Y_dot;
+	lin_vel.z=global_Z_dot;
 	//ROS_INFO("Attitude - [r: %f  p: %f  y:%f]",cam_att(0),cam_att(1),cam_att(2));
 	//ROS_INFO("Linear_velocity - [x: %f  y: %f  z:%f]",v(0),v(1),v(2));
 	//ROS_INFO("Angular_velocity - [x: %f  y: %f  z:%f]",w(0),w(1),w(2));
@@ -742,9 +817,9 @@ void disturbance_Observer(){
 	double Qtautilde_y = pow(fq_cutoff,3)*y_y3;
 
 	double dhat_y = tauhat_y - Qtautilde_y;
-	dhat.x = dhat_r;
-	dhat.y = dhat_p;
-	dhat.z = dhat_y;
+//	dhat.x = dhat_r;
+//	dhat.y = dhat_p;
+//	dhat.z = dhat_y;
 
 	//tautilde_y_d = tau_y_d - dhat_y;
     tautilde_y_d = tau_y_d;
@@ -844,7 +919,7 @@ void state_Reader(){
 
 	if(!loading){
 	 	if(hovering){
-	 		if(F_zd-hovering_force<-2.0 && fabs(Z_d-pos.z)<0.02 && fabs(r_d-imu_rpy.x)<0.05 && fabs(p_d-imu_rpy.y)<0.05){
+	 		if(/*F_zd-hovering_force<-2.0 &&*/ fabs(Z_d-pos.z)<0.02 && fabs(r_d-imu_rpy.x)<0.05 && fabs(p_d-imu_rpy.y)<0.05){
 	 			loading_time_count+=delta_t.count();
 				loading_force+=F_zd;
 				loading_count++;
@@ -871,47 +946,47 @@ void state_Reader(){
 	}
 	else{
 		if(hovering){
-			if(estimation_timer > 30.0){
+			if(estimation_timer > 60.0){
 				if(!x_c_convergence && fabs(filtered_grad_x*1000)<0.1){
 					x_c_convergence_time_count+=delta_t.count();
-					if(x_c_convergence_time_count>7.5){
+					if(x_c_convergence_time_count>5.0){
 						x_c_convergence = true;
 						ROS_INFO("x_c Estimation complete");
 					}
 				}
 				else{
-					if(x_c_convergence && fabs(filtered_grad_x*1000)>0.2){
-						x_c_convergence = false;
-						ROS_INFO("x_c yet");
-					}
+			//		if(x_c_convergence && fabs(filtered_grad_x*1000)>0.3){
+			//			x_c_convergence = false;
+			//			ROS_INFO("x_c yet");
+			//		}
 					x_c_convergence_time_count = 0;
 				}
 				if(!y_c_convergence && fabs(filtered_grad_y*1000)<0.1){
 					y_c_convergence_time_count+=delta_t.count();
-					if(y_c_convergence_time_count>7.5){
+					if(y_c_convergence_time_count>5.0){
 						y_c_convergence = true;
 						ROS_INFO("y_c Estimation complete");
 					}
 				}
 				else{
-					if(y_c_convergence && fabs(filtered_grad_y*1000)>0.2){
-						y_c_convergence = false;
-						ROS_INFO("y_c yet");
-					}
+			//		if(y_c_convergence && fabs(filtered_grad_y*1000)>0.3){
+			//			y_c_convergence = false;
+			//			ROS_INFO("y_c yet");
+			//		}
 					y_c_convergence_time_count= 0;
 				}
-				if(!z_c_convergence && fabs(filtered_grad_z*1000)<0.1){
+				if(!z_c_convergence && fabs(filtered_grad_z*1000)<0.05){
 					z_c_convergence_time_count+=delta_t.count();
-					if(z_c_convergence_time_count>7.5){
+					if(z_c_convergence_time_count>5.0){
 						z_c_convergence = true;
 						ROS_INFO("z_c Estimation complete");
 					}
 				}
 				else{
-					if(z_c_convergence && fabs(filtered_grad_z*1000)>0.2){
-						z_c_convergence = false;
-						ROS_INFO("z_c yet");
-					}
+			//		if(z_c_convergence && fabs(filtered_grad_z*1000)>0.2){
+			//			z_c_convergence = false;
+			//			ROS_INFO("z_c yet");
+			//		}
 					z_c_convergence_time_count = 0;
 				}
 			}	
@@ -941,4 +1016,327 @@ void state_Reader(){
 			}
 		}
 	}
+}
+
+void get_MHE_measurement_control_input(){
+	if(measurement_x.length()==(N_MHE+1)) measurement_x.deleteHead();
+	if(measurement_y.length()==(N_MHE+1)) measurement_y.deleteHead();
+	if(measurement_z.length()==(N_MHE+1)) measurement_z.deleteHead();
+	if(measurement_x_dot.length()==(N_MHE+1)) measurement_x_dot.deleteHead();
+	if(measurement_y_dot.length()==(N_MHE+1)) measurement_y_dot.deleteHead();
+	if(measurement_z_dot.length()==(N_MHE+1)) measurement_z_dot.deleteHead();
+	if(measurement_roll.length()==(N_MHE+1)) measurement_roll.deleteHead();
+	if(measurement_pitch.length()==(N_MHE+1)) measurement_pitch.deleteHead();
+	if(measurement_yaw.length()==(N_MHE+1)) measurement_yaw.deleteHead();
+	if(measurement_omega_x.length()==(N_MHE+1)) measurement_omega_x.deleteHead();
+	if(measurement_omega_y.length()==(N_MHE+1)) measurement_omega_y.deleteHead();
+	if(measurement_omega_z.length()==(N_MHE+1)) measurement_omega_z.deleteHead();
+	if(control_input_F_x.length()==N_MHE) control_input_F_x.deleteHead();
+	if(control_input_F_y.length()==N_MHE) control_input_F_y.deleteHead();
+	if(control_input_F_z.length()==N_MHE) control_input_F_z.deleteHead();
+	if(control_input_tau_x.length()==N_MHE) control_input_tau_x.deleteHead();
+	if(control_input_tau_y.length()==N_MHE) control_input_tau_y.deleteHead();
+	if(control_input_tau_z.length()==N_MHE) control_input_tau_z.deleteHead();
+
+	measurement_x.insertTail(pos.x);
+	measurement_y.insertTail(pos.y);
+	measurement_z.insertTail(pos.z);
+	measurement_x_dot.insertTail(lin_vel.x);	
+	measurement_y_dot.insertTail(lin_vel.y);	
+	measurement_z_dot.insertTail(lin_vel.z);
+	measurement_roll.insertTail(imu_rpy.x);	
+	measurement_pitch.insertTail(imu_rpy.y);	
+	measurement_yaw.insertTail(imu_rpy.z);
+	measurement_omega_x.insertTail(imu_ang_vel.x);	
+	measurement_omega_y.insertTail(imu_ang_vel.y);	
+	measurement_omega_z.insertTail(imu_ang_vel.z);
+	control_input_F_x.insertTail(force_d.x);	
+	control_input_F_y.insertTail(force_d.y);	
+	control_input_F_z.insertTail(force_d.z);	
+	control_input_tau_x.insertTail(torque_d.x);	
+	control_input_tau_y.insertTail(torque_d.y);	
+	control_input_tau_z.insertTail(torque_d.z);	
+//	std::cout << measurement_x_dot.getData(0) << std::endl;
+	for(int i=0;i<N_MHE+1;i++){
+		MHE_measurements(0,i)=measurement_x.getData(i);
+		MHE_measurements(1,i)=measurement_y.getData(i);	
+		MHE_measurements(2,i)=measurement_z.getData(i);
+		MHE_measurements(3,i)=measurement_x_dot.getData(i);
+		MHE_measurements(4,i)=measurement_y_dot.getData(i);
+		MHE_measurements(5,i)=measurement_z_dot.getData(i);
+		MHE_measurements(6,i)=measurement_roll.getData(i);
+		MHE_measurements(7,i)=measurement_pitch.getData(i);
+		MHE_measurements(8,i)=measurement_yaw.getData(i);
+		MHE_measurements(9,i)=measurement_omega_x.getData(i);
+		MHE_measurements(10,i)=measurement_omega_y.getData(i);
+		MHE_measurements(11,i)=measurement_omega_z.getData(i);
+
+		if(i<N_MHE){
+			MHE_control_inputs(0,i)=control_input_F_x.getData(i);			
+			MHE_control_inputs(1,i)=control_input_F_y.getData(i);
+			MHE_control_inputs(2,i)=control_input_F_z.getData(i);
+			MHE_control_inputs(3,i)=control_input_tau_x.getData(i);
+			MHE_control_inputs(4,i)=control_input_tau_y.getData(i);
+			MHE_control_inputs(5,i)=control_input_tau_z.getData(i);
+		}
+	}
+
+//	opti.set_value(MHE_U,MHE_control_inputs);
+//	opti.set_value(MHE_Y,MHE_measurements);
+}
+
+MX f(const MX& x, const MX& u){
+	MX dx=MX::zeros(n_states,1);
+	dx(0)=x(3);
+	dx(1)=x(4);
+	dx(2)=x(5);
+	dx(3)=(x(12) - u(1) * (cos(x(6)) * sin(x(8)) - cos(x(8)) * sin(x(6)) * sin(x(7))) + u(2) * (sin(x(6)) * sin(x(8)) + cos(x(6)) * cos(x(8)) * sin(x(7))) + u(0) * cos(x(8)) * cos(x(7))) / mass;
+	dx(4)=(x(13) + u(1) * (cos(x(6)) * cos(x(8)) + sin(x(6)) * sin(x(8)) * sin(x(7))) - u(2) * (cos(x(8)) * sin(x(6)) - cos(x(6)) * sin(x(8)) * sin(x(7))) + u(0) * cos(x(7)) * sin(x(8))) / mass;
+	dx(5)=g + (x(14) - u(0) * sin(x(7)) + u(2) * cos(x(6)) * cos(x(7)) + u(1) * cos(x(7)) * sin(x(6))) / mass;
+	dx(6)=x(9) + sin(x(6)) * tan(x(7)) * x(10) + cos(x(6)) * tan(x(7)) * x(11);
+	dx(7)=cos(x(6)) * x(10) - sin(x(6)) * x(11);
+	dx(8)=sin(x(6)) / cos(x(7)) * x(10) + cos(x(6)) / cos(x(7)) * x(11);
+	dx(9)=(u(3) + x(15)) / Jxx;
+   	dx(10)=(u(4) + x(16)) / Jyy;
+      	dx(11)=(u(5) + x(17)) / Jzz;
+	dx(12)=0; dx(13)=0; dx(14)=0;
+	dx(15)=0; dx(16)=0; dx(17)=0;
+	return x+dx*delta_t.count();
+/*	return MX::vertcat({x(0)+x(3)*delta_t.count(),
+		       x(1)+x(4)*delta_t.count(),
+                       x(2)+x(5)*delta_t.count(),
+		       x(3)+((x(12) - u(1) * (cos(x(6)) * sin(x(8)) - cos(x(8)) * sin(x(6)) * sin(x(7))) + u(2) * (sin(x(6)) * sin(x(8)) + cos(x(6)) * cos(x(8)) * sin(x(7))) + u(0) * cos(x(8)) * cos(x(7))) / mass)*delta_t.count(),
+		       x(4)+((x(13) + u(1) * (cos(x(6)) * cos(x(8)) + sin(x(6)) * sin(x(8)) * sin(x(7))) - u(2) * (cos(x(8)) * sin(x(6)) - cos(x(6)) * sin(x(8)) * sin(x(7))) + u(0) * cos(x(7)) * sin(x(8))) / mass)*delta_t.count(),
+		       x(5)+(g + (x(14) - u(0) * sin(x(7)) + u(2) * cos(x(6)) * cos(x(7)) + u(1) * cos(x(7)) * sin(x(6))) / mass)*delta_t.count(),
+		       x(6)+(x(9) + sin(x(6)) * tan(x(7)) * x(10) + cos(x(6)) * tan(x(7)) * x(11))*delta_t.count(),
+		       x(7)+(cos(x(6)) * x(10) - sin(x(6)) * x(11))*delta_t.count(),
+		       x(8)+(sin(x(6)) / cos(x(7)) * x(10) + cos(x(6)) / cos(x(7)) * x(11))*delta_t.count(),
+		       x(9)+((u(3) + x(15)) / Jxx)*delta_t.count(),
+		       x(10)+((u(4) + x(16)) / Jyy)*delta_t.count(),
+		       x(11)+((u(5) + x(17)) / Jzz)*delta_t.count(),
+		       x(12), 
+		       x(13), 
+		       x(14),
+		       x(15), 
+		       x(16), 
+		       x(17)});*/
+}
+
+MX h(const MX& x){
+/*	MX y=opti.variable(n_outputs,1);
+	y(0)=x(0);	
+	y(1)=x(1);	
+	y(2)=x(2);	
+	y(3)=x(3);	
+	y(4)=x(4);	
+	y(5)=x(5);	
+	y(6)=x(6);	
+	y(7)=x(7);	
+	y(8)=x(8);	
+	y(9)=x(9);	
+	y(10)=x(10);	
+	y(11)=x(11);	*/
+	return x(Slice(0,n_outputs));
+}
+
+void MHE_nlp_setting(){
+/*
+	for(int k=0; k<N_MHE+1; k++){
+		MX st=MHE_X(all_elem,k);
+		MX y_tilde=MHE_Y(all_elem,k);
+		MX h_x=h(st);//MHE_X(Slice(0,n_outputs),k);
+		obj+=mtimes(mtimes((y_tilde-h_x).T(),output_stage_cost_weight),(y_tilde-h_x)); 
+//		std::cout << h_x.size() << std::endl; 
+	//	obj+=test_mx;
+		if(k<N_MHE){
+			MX con=MHE_U(all_elem,k);
+			MX next_st=MHE_X(all_elem,k+1);
+			MX f_xu=f(st,con);
+			obj+=mtimes(mtimes((next_st-f_xu).T(),state_stage_cost_weight),(next_st-f_xu));
+		}
+	}
+	MX init_st=MHE_X(all_elem,0);
+	obj+=mtimes(mtimes((init_st-MHE_init_X_tilde).T(),arrival_cost_weight),(init_st-MHE_init_X_tilde));
+	
+	opti.minimize(obj);
+	
+	for(int k=0;k<N_MHE;k++){
+		MX st=MHE_X(all_elem,k);
+		MX con=MHE_U(all_elem,k);
+		MX st_next=f(st,con);
+		opti.subject_to(MHE_X(all_elem,k+1)==st_next);	
+	}
+
+	opti.subject_to(-5<=MHE_x_pos<=5);
+	opti.subject_to(-5<=MHE_y_pos<=5);
+	opti.subject_to(-3<=MHE_z_pos<=0.5);
+	opti.subject_to(-3<=MHE_x_vel<=3);
+	opti.subject_to(-3<=MHE_y_vel<=3);
+	opti.subject_to(-5<=MHE_z_vel<=5);
+	opti.subject_to(-0.5<=MHE_roll<=0.5);
+	opti.subject_to(-0.5<=MHE_pitch<=0.5);
+	opti.subject_to(-PI<=MHE_yaw<=PI);
+	opti.subject_to(-2<=MHE_omega_x<=2);
+	opti.subject_to(-2<=MHE_omega_y<=2);
+	opti.subject_to(-2<=MHE_omega_z<=2);
+	opti.subject_to(-5<=MHE_F_ex<=5);
+	opti.subject_to(-5<=MHE_F_ey<=5);
+	opti.subject_to(-5<=MHE_F_ez<=5);
+	opti.subject_to(-3<=MHE_tau_ex<=3);
+	opti.subject_to(-3<=MHE_tau_ey<=3);
+	opti.subject_to(-3<=MHE_tau_ez<=3);
+	opti.subject_to(obj>=0);
+
+	opti.set_initial(MHE_x_pos,0);
+	opti.set_initial(MHE_y_pos,0);
+	opti.set_initial(MHE_z_pos,0);
+	opti.set_initial(MHE_x_vel,0);
+	opti.set_initial(MHE_y_vel,0);
+	opti.set_initial(MHE_z_vel,0);
+	opti.set_initial(MHE_roll,0);
+	opti.set_initial(MHE_pitch,0);
+	opti.set_initial(MHE_yaw,PI/4.0);
+	opti.set_initial(MHE_omega_x,0);
+	opti.set_initial(MHE_omega_y,0);
+	opti.set_initial(MHE_omega_z,0);
+	opti.set_initial(MHE_F_ex,0);
+	opti.set_initial(MHE_F_ey,0);
+	opti.set_initial(MHE_F_ez,0);
+	opti.set_initial(MHE_tau_ex,0);
+	opti.set_initial(MHE_tau_ey,0);
+	opti.set_initial(MHE_tau_ez,0);
+
+	opti.set_value(MHE_init_X_tilde,MHE_X_star(all_elem,1));	
+	opti.set_value(MHE_Y,MHE_measurements);
+	opti.set_value(MHE_U,MHE_control_inputs);
+	
+
+	Dict solver_option;
+	//solver_option["ipopt.max_iter"]=2000;
+	solver_option["print_time"]=0;
+	solver_option["ipopt.print_level"]=0;
+	solver_option["ipopt.acceptable_tol"]=1e-8;
+	solver_option["ipopt.acceptable_obj_change_tol"]=1e-6;
+		
+	opti.solver("ipopt",solver_option);
+*/
+}
+
+void MHE_external_force_estimation(){
+//	std::cout << obj.size() << std::endl;
+
+Opti opti;
+MX obj=opti.variable();
+MX MHE_X=opti.variable(n_states,N_MHE+1); 
+MX MHE_Y=opti.parameter(n_outputs,N_MHE+1);
+MX MHE_U=opti.parameter(n_controls,N_MHE);
+MX MHE_init_X_tilde=opti.parameter(n_states,1);
+MX output_stage_cost_weight=MX::eye(n_outputs)*10;
+MX state_stage_cost_weight=MX::eye(n_states);
+MX arrival_cost_weight=MX::eye(n_states);
+
+auto MHE_x_pos = MHE_X(0,all_elem);
+auto MHE_y_pos = MHE_X(1,all_elem);
+auto MHE_z_pos = MHE_X(2,all_elem);
+auto MHE_x_vel = MHE_X(3,all_elem);
+auto MHE_y_vel = MHE_X(4,all_elem);
+auto MHE_z_vel = MHE_X(5,all_elem);
+auto MHE_roll = MHE_X(6,all_elem);
+auto MHE_pitch = MHE_X(7,all_elem);
+auto MHE_yaw = MHE_X(8,all_elem);
+auto MHE_omega_x = MHE_X(9,all_elem);
+auto MHE_omega_y = MHE_X(10,all_elem);
+auto MHE_omega_z = MHE_X(11,all_elem);
+auto MHE_F_ex = MHE_X(12,all_elem);
+auto MHE_F_ey = MHE_X(13,all_elem);
+auto MHE_F_ez = MHE_X(14,all_elem);
+auto MHE_tau_ex = MHE_X(15,all_elem);
+auto MHE_tau_ey = MHE_X(16,all_elem);
+auto MHE_tau_ez = MHE_X(17,all_elem);
+
+	for(int k=0; k<N_MHE+1; k++){
+		MX st=MHE_X(all_elem,k);
+		MX y_tilde=MHE_Y(all_elem,k);
+		MX h_x=h(st);//MHE_X(Slice(0,n_outputs),k);
+		obj+=mtimes(mtimes((y_tilde-h_x).T(),output_stage_cost_weight),(y_tilde-h_x)); 
+//		std::cout << h_x.size() << std::endl; 
+	//	obj+=test_mx;
+		if(k<N_MHE){
+			MX con=MHE_U(all_elem,k);
+			MX next_st=MHE_X(all_elem,k+1);
+			MX f_xu=f(st,con);
+			obj+=mtimes(mtimes((next_st-f_xu).T(),state_stage_cost_weight),(next_st-f_xu));
+		}
+	}
+	MX init_st=MHE_X(all_elem,0);
+	obj+=mtimes(mtimes((init_st-MHE_init_X_tilde).T(),arrival_cost_weight),(init_st-MHE_init_X_tilde));
+	
+	opti.minimize(obj);
+	
+	for(int k=0;k<N_MHE;k++){
+		MX st=MHE_X(all_elem,k);
+		MX con=MHE_U(all_elem,k);
+		MX st_next=f(st,con);
+		opti.subject_to(MHE_X(all_elem,k+1)==st_next);	
+	}
+
+	opti.subject_to(-5<=MHE_x_pos<=5);
+	opti.subject_to(-5<=MHE_y_pos<=5);
+	opti.subject_to(-3<=MHE_z_pos<=0.5);
+	opti.subject_to(-3<=MHE_x_vel<=3);
+	opti.subject_to(-3<=MHE_y_vel<=3);
+	opti.subject_to(-5<=MHE_z_vel<=5);
+	opti.subject_to(-0.5<=MHE_roll<=0.5);
+	opti.subject_to(-0.5<=MHE_pitch<=0.5);
+	opti.subject_to(-PI<=MHE_yaw<=PI);
+	opti.subject_to(-2<=MHE_omega_x<=2);
+	opti.subject_to(-2<=MHE_omega_y<=2);
+	opti.subject_to(-2<=MHE_omega_z<=2);
+	opti.subject_to(-5<=MHE_F_ex<=5);
+	opti.subject_to(-5<=MHE_F_ey<=5);
+	opti.subject_to(-5<=MHE_F_ez<=5);
+	opti.subject_to(-3<=MHE_tau_ex<=3);
+	opti.subject_to(-3<=MHE_tau_ey<=3);
+	opti.subject_to(-3<=MHE_tau_ez<=3);
+//	opti.subject_to(obj>=0);
+
+	opti.set_initial(MHE_x_pos,horzcat(MHE_X_star(0,Slice(1,11,1)),MHE_X_star(0,10)));
+	opti.set_initial(MHE_y_pos,horzcat(MHE_X_star(1,Slice(1,11,1)),MHE_X_star(1,10)));
+	opti.set_initial(MHE_z_pos,horzcat(MHE_X_star(2,Slice(1,11,1)),MHE_X_star(2,10)));
+	opti.set_initial(MHE_x_vel,horzcat(MHE_X_star(3,Slice(1,11,1)),MHE_X_star(3,10)));
+	opti.set_initial(MHE_y_vel,horzcat(MHE_X_star(4,Slice(1,11,1)),MHE_X_star(4,10)));
+	opti.set_initial(MHE_z_vel,horzcat(MHE_X_star(5,Slice(1,11,1)),MHE_X_star(5,10)));
+	opti.set_initial(MHE_roll,horzcat(MHE_X_star(6,Slice(1,11,1)),MHE_X_star(6,10)));
+	opti.set_initial(MHE_pitch,horzcat(MHE_X_star(7,Slice(1,11,1)),MHE_X_star(7,10)));
+	opti.set_initial(MHE_yaw,horzcat(MHE_X_star(8,Slice(1,11,1)),MHE_X_star(8,10)));
+	opti.set_initial(MHE_omega_x,horzcat(MHE_X_star(9,Slice(1,11,1)),MHE_X_star(9,10)));
+	opti.set_initial(MHE_omega_y,horzcat(MHE_X_star(10,Slice(1,11,1)),MHE_X_star(10,10)));
+	opti.set_initial(MHE_omega_z,horzcat(MHE_X_star(11,Slice(1,11,1)),MHE_X_star(11,10)));
+	opti.set_initial(MHE_F_ex,horzcat(MHE_X_star(12,Slice(1,11,1)),MHE_X_star(12,10)));
+	opti.set_initial(MHE_F_ey,horzcat(MHE_X_star(13,Slice(1,11,1)),MHE_X_star(13,10)));
+	opti.set_initial(MHE_F_ez,horzcat(MHE_X_star(14,Slice(1,11,1)),MHE_X_star(14,10)));
+	opti.set_initial(MHE_tau_ex,horzcat(MHE_X_star(15,Slice(1,11,1)),MHE_X_star(15,10)));
+	opti.set_initial(MHE_tau_ey,horzcat(MHE_X_star(16,Slice(1,11,1)),MHE_X_star(16,10)));
+	opti.set_initial(MHE_tau_ez,horzcat(MHE_X_star(17,Slice(1,11,1)),MHE_X_star(17,10)));
+	
+	Dict solver_option;
+	solver_option["ipopt.max_iter"]=2000;
+	solver_option["print_time"]=0;
+//	solver_option["ipopt.print_level"]=0;
+	solver_option["ipopt.acceptable_tol"]=1e-8;
+	solver_option["ipopt.acceptable_obj_change_tol"]=1e-6;
+		
+	opti.solver("ipopt",solver_option);
+
+	opti.set_value(MHE_init_X_tilde,MHE_X_star(all_elem,1));	
+	opti.set_value(MHE_Y,MHE_measurements);
+	opti.set_value(MHE_U,MHE_control_inputs);
+
+	
+	OptiSol sol=opti.solve();	
+	MHE_X_star = sol.value(MHE_X);
+	//opti.set_value(MHE_init_X_tilde,MHE_X_star(all_elem,1));	
+	std::cout << sol.value(MHE_X_star(12,10)) << std::endl;
+	std::cout << std::endl;
+
 }
