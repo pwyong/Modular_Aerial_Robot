@@ -1,0 +1,3 @@
+<launch>
+	<node name="external_wrench_estimator_node" pkg="external_wrench_nmhe" type="external_wrench_estimator" output="screen"/>;
+</launch>
