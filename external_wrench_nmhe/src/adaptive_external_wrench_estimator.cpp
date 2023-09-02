@@ -3,7 +3,6 @@
 #include <vector>
 #include <cmath>
 #include <chrono>
-#include <std_msgs/Int16MultiArray.h>
 #include <std_msgs/Float32MultiArray.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/String.h>
@@ -20,23 +19,19 @@ std_msgs::Float32MultiArray mhe_measurement;
 
 geometry_msgs::Vector3 external_force;
 geometry_msgs::Vector3 external_torque;
-geometry_msgs::Vector3 MoI;
-geometry_msgs::Vector3 CoM;
-std_msgs::Float32 Mass;
 
-int N_MHE=5; //Window length
-int n_states=18; //pos vel att omega ext_F ext_T
-int n_controls=6; // Force Torque
-int n_outputs=15; // pos vel att omega imu_acl
+int N_MHE=5;
+int n_states=18;
+int n_controls=6;
+int n_outputs=12;
 double Jxx=0.005; double Jyy=0.005; double Jzz=0.01;
 double mass=2.42; double g=9.81; double PI=3.141592;
 
-DM MHE_control_inputs = DM::zeros(n_controls,N_MHE+1);
+DM MHE_control_inputs = DM::zeros(n_controls,N_MHE);
 DM MHE_measurements = DM::zeros(n_outputs,N_MHE+1);
-DM MHE_force_dhat = DM::zeros(3,1);
 
 MX F(const MX& x, const MX& u);
-MX H(const MX& x, const MX& u);
+MX H(const MX& x);
 
 Slice all_elem;
 Opti opti;
@@ -45,16 +40,13 @@ MX MHE_X=opti.variable(n_states,N_MHE+1);
 //MX MHE_W=opti.variable(n_states,N_MHE);
 //MX MHE_V=opti.variable(n_outputs,N_MHE+1);
 MX MHE_Y=opti.parameter(n_outputs,N_MHE+1);
-MX MHE_U=opti.parameter(n_controls,N_MHE+1);
+MX MHE_U=opti.parameter(n_controls,N_MHE);
 MX MHE_init_X_tilde=opti.parameter(n_states,1);
 MX MHE_sampling_time=opti.parameter(1,1);
-MX MHE_force_disturbance=opti.parameter(3,1);
-DM output_stage_cost_weight=DM::eye(n_outputs)*5.0;
-DM state_stage_cost_weight=DM::eye(n_states);
-DM arrival_cost_weight=DM::eye(n_states);
-
-int16_t Sbus[9];
-bool in_flight = false;
+MX MHE_mass=opti.parameter(1,1);
+double output_stage_cost_weight=12.0;
+double state_stage_cost_weight=1.0;
+double arrival_cost_weight=1.0;
 
 auto MHE_x_pos = MHE_X(0,all_elem);
 auto MHE_y_pos = MHE_X(1,all_elem);
@@ -75,7 +67,6 @@ auto MHE_tau_ex = MHE_X(15,all_elem);
 auto MHE_tau_ey = MHE_X(16,all_elem);
 auto MHE_tau_ez = MHE_X(17,all_elem);
 
-
 DM MHE_X_star=DM::zeros(n_states,N_MHE+1);
 //DM MHE_W_tilde=DM::zeros(n_states,N_MHE);
 //DM MHE_V_tilde=DM::zeros(n_outputs,N_MHE+1);
@@ -86,7 +77,6 @@ double sampling_time;
 
 void mhe_get_measurements_control_inputs();
 void mhe_nlp_setting();
-void mhe_set_initial();
 void mhe_external_wrench_estimation();
 void control_input_force_Callback(const geometry_msgs::Vector3& msg);
 void control_input_torque_Callback(const geometry_msgs::Vector3& msg);
@@ -94,9 +84,7 @@ void measurement_position_Callback(const geometry_msgs::Vector3& msg);
 void measurement_velocity_Callback(const geometry_msgs::Vector3& msg);
 void measurement_attitude_Callback(const geometry_msgs::Vector3& msg);
 void measurement_omega_Callback(const geometry_msgs::Vector3& msg);
-void measurement_imu_acl_Callback(const geometry_msgs::Vector3& msg);
-void sbus_Callback(const std_msgs::Int16MultiArray::ConstPtr& array);
-void force_DOB_result_Callback(const geometry_msgs::Vector3& msg);
+void mass_Callback(const std_msgs::Float32& msg);
 
 DoubleLinkedList measurement_x;
 DoubleLinkedList measurement_y;
@@ -110,9 +98,6 @@ DoubleLinkedList measurement_yaw;
 DoubleLinkedList measurement_omega_x;
 DoubleLinkedList measurement_omega_y;
 DoubleLinkedList measurement_omega_z;
-DoubleLinkedList measurement_imu_acl_x;
-DoubleLinkedList measurement_imu_acl_y;
-DoubleLinkedList measurement_imu_acl_z;
 DoubleLinkedList control_input_F_x;
 DoubleLinkedList control_input_F_y;
 DoubleLinkedList control_input_F_z;
@@ -127,17 +112,10 @@ geometry_msgs::Vector3 pos;
 geometry_msgs::Vector3 vel;
 geometry_msgs::Vector3 attitude;
 geometry_msgs::Vector3 omega;
-geometry_msgs::Vector3 imu_acl;
-geometry_msgs::Vector3 force_dhat;
 
 auto end=std::chrono::high_resolution_clock::now();
 auto start=std::chrono::high_resolution_clock::now();
 std::chrono::duration<double> delta_t;
-
-template<class T>
-T map(T x, T in_min, T in_max, T out_min, T out_max){
-	return (x-in_min)*(out_max-out_min)/(in_max-in_min)+out_min;
-}
 
 int main(int argc, char **argv){
 
@@ -151,13 +129,11 @@ int main(int argc, char **argv){
 	ros::Subscriber measurement_velocity_sub=nh.subscribe("/lin_vel",1,measurement_velocity_Callback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber measurement_attitude_sub=nh.subscribe("/angle",1,measurement_attitude_Callback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber measurement_omega_sub=nh.subscribe("/angular_velocity",1,measurement_omega_Callback,ros::TransportHints().tcpNoDelay());
-	ros::Subscriber measurement_imu_acl_sub=nh.subscribe("/lin_acl",1,measurement_imu_acl_Callback,ros::TransportHints().tcpNoDelay());
-	ros::Subscriber sbus_sub=nh.subscribe("/sbus",100,sbus_Callback,ros::TransportHints().tcpNoDelay());
-	ros::Subscriber force_DOB_result_sub=nh.subscribe("/force_dhat",1,force_DOB_result_Callback,ros::TransportHints().tcpNoDelay());
+	ros::Subscriber mass_sub=nh.subscribe("/mass",1,mass_Callback,ros::TransportHints().tcpNoDelay());
 
-	ros::Publisher external_force_pub=nh.advertise<geometry_msgs::Vector3>("external_force",1);
-	ros::Publisher external_torque_pub=nh.advertise<geometry_msgs::Vector3>("external_torque",1);
-	ros::Publisher mhe_delta_t_pub=nh.advertise<std_msgs::Float32>("mhe_delta_t",1);	
+	ros::Publisher external_force_pub=nh.advertise<geometry_msgs::Vector3>("adaptive_external_force",1);
+	ros::Publisher external_torque_pub=nh.advertise<geometry_msgs::Vector3>("adaptive_external_torque",1);
+	ros::Publisher mhe_delta_t_pub=nh.advertise<std_msgs::Float32>("adaptive_mhe_delta_t",1);	
 
 //	N_MHE=nh.param<int>("MHE_window_length",10);
 	
@@ -171,18 +147,12 @@ int main(int argc, char **argv){
 //		sampling_time=delta_t.count();
 		start=std::chrono::high_resolution_clock::now();
 
-		if(Sbus[4]>1500 && Sbus[8]>1500 && pos.z < -0.2) in_flight=true;
-		else in_flight = false;
-
 		mhe_get_measurements_control_inputs();
-		if(in_flight) mhe_external_wrench_estimation();
+		mhe_external_wrench_estimation();
 		
 		external_force_pub.publish(external_force);
 		external_torque_pub.publish(external_torque);
 		mhe_delta_t_pub.publish(mhe_delta_t);
-//		MoI_pub.publish(MoI);
-//		CoM_pub.publish(CoM);
-//		mass_pub.publish(Mass);
 
 		ros::spinOnce();
 	}
@@ -194,9 +164,9 @@ MX F(const MX& x, const MX& u){
 	dx(0)=x(3);
 	dx(1)=x(4);
 	dx(2)=x(5);
-	dx(3)=((x(12) + MHE_force_disturbance(0)) - u(1) * (cos(x(6)) * sin(x(8)) - cos(x(8)) * sin(x(6)) * sin(x(7))) + u(2) * (sin(x(6)) * sin(x(8)) + cos(x(6)) * cos(x(8)) * sin(x(7))) + u(0) * cos(x(8)) * cos(x(7))) / mass;
-	dx(4)=((x(13) + MHE_force_disturbance(1)) + u(1) * (cos(x(6)) * cos(x(8)) + sin(x(6)) * sin(x(8)) * sin(x(7))) - u(2) * (cos(x(8)) * sin(x(6)) - cos(x(6)) * sin(x(8)) * sin(x(7))) + u(0) * cos(x(7)) * sin(x(8))) / mass;
-	dx(5)=g + ((x(14) + MHE_force_disturbance(2)) - u(0) * sin(x(7)) + u(2) * cos(x(6)) * cos(x(7)) + u(1) * cos(x(7)) * sin(x(6))) / mass;
+	dx(3)=(x(12) - u(1) * (cos(x(6)) * sin(x(8)) - cos(x(8)) * sin(x(6)) * sin(x(7))) + u(2) * (sin(x(6)) * sin(x(8)) + cos(x(6)) * cos(x(8)) * sin(x(7))) + u(0) * cos(x(8)) * cos(x(7))) / MHE_mass;
+	dx(4)=(x(13) + u(1) * (cos(x(6)) * cos(x(8)) + sin(x(6)) * sin(x(8)) * sin(x(7))) - u(2) * (cos(x(8)) * sin(x(6)) - cos(x(6)) * sin(x(8)) * sin(x(7))) + u(0) * cos(x(7)) * sin(x(8))) / MHE_mass;
+	dx(5)=g + (x(14) - u(0) * sin(x(7)) + u(2) * cos(x(6)) * cos(x(7)) + u(1) * cos(x(7)) * sin(x(6))) / MHE_mass;
 	dx(6)=x(9) + sin(x(6)) * tan(x(7)) * x(10) + cos(x(6)) * tan(x(7)) * x(11);
 	dx(7)=cos(x(6)) * x(10) - sin(x(6)) * x(11);
 	dx(8)=sin(x(6)) / cos(x(7)) * x(10) + cos(x(6)) / cos(x(7)) * x(11);
@@ -205,28 +175,11 @@ MX F(const MX& x, const MX& u){
       	dx(11)=(u(5) + x(17) - (Jyy - Jxx)*x(9)*x(10)) / Jzz;
 	dx(12)=0; dx(13)=0; dx(14)=0;
 	dx(15)=0; dx(16)=0; dx(17)=0;
-	
 	return x+dx*MHE_sampling_time;
 }
 
-MX H(const MX& x, const MX& u){
-	MX y=MX::zeros(n_outputs,1);
-	y(0)=x(0);
-	y(1)=x(1);
-	y(2)=x(2);
-	y(3)=x(3);
-	y(4)=x(4);
-	y(5)=x(5);
-	y(6)=x(6);
-	y(7)=x(7);
-	y(8)=x(8);
-	y(9)=x(9);
-	y(10)=x(10);
-	y(11)=x(11);
-	y(12)=u(0)/mass + (cos(x(7))*cos(x(8))*(x(12)+MHE_force_disturbance(0))+cos(x(7))*sin(x(8))*(x(13)+MHE_force_disturbance(1))-sin(x(7))*(x(14)+MHE_force_disturbance(2))) / mass;
-	y(13)=u(1)/mass + ((-cos(x(6))*sin(x(8))+sin(x(6))*sin(x(7))*cos(x(8)))*(x(12)+MHE_force_disturbance(0))+(cos(x(6))*cos(x(8))+sin(x(6))*sin(x(7))*sin(x(8)))*(x(13)+MHE_force_disturbance(1))+(sin(x(6))*cos(x(7)))*(x(14)+MHE_force_disturbance(2))) / mass;
-	y(14)=u(2)/mass + ((sin(x(6))*sin(x(8))+cos(x(6))*sin(x(7))*cos(x(8)))*(x(12)+MHE_force_disturbance(0))+(-sin(x(6))*cos(x(8))+cos(x(6))*sin(x(7))*sin(x(8)))*(x(13)+MHE_force_disturbance(1))+(cos(x(6))*cos(x(7)))*(x(14)+MHE_force_disturbance(2))) / mass; 
-	return y;
+MX H(const MX& x){
+	return x(Slice(0,n_outputs));
 }
 
 void mhe_get_measurements_control_inputs(){
@@ -242,9 +195,6 @@ void mhe_get_measurements_control_inputs(){
 	if(measurement_omega_x.length()==(N_MHE+1)) measurement_omega_x.deleteHead();
 	if(measurement_omega_y.length()==(N_MHE+1)) measurement_omega_y.deleteHead();
 	if(measurement_omega_z.length()==(N_MHE+1)) measurement_omega_z.deleteHead();
-	if(measurement_imu_acl_x.length()==(N_MHE+1)) measurement_imu_acl_x.deleteHead();
-	if(measurement_imu_acl_y.length()==(N_MHE+1)) measurement_imu_acl_y.deleteHead();
-	if(measurement_imu_acl_z.length()==(N_MHE+1)) measurement_imu_acl_z.deleteHead();
 	if(control_input_F_x.length()==N_MHE+1) control_input_F_x.deleteHead();
 	if(control_input_F_y.length()==N_MHE+1) control_input_F_y.deleteHead();
 	if(control_input_F_z.length()==N_MHE+1) control_input_F_z.deleteHead();
@@ -264,14 +214,11 @@ void mhe_get_measurements_control_inputs(){
 	measurement_omega_x.insertTail(omega.x);
 	measurement_omega_y.insertTail(omega.y);
 	measurement_omega_z.insertTail(omega.z);
-	measurement_imu_acl_x.insertTail(imu_acl.x);
-	measurement_imu_acl_y.insertTail(imu_acl.y);
-	measurement_imu_acl_z.insertTail(imu_acl.z);
 	control_input_F_x.insertTail(force_d.x);
 	control_input_F_y.insertTail(force_d.y);
 	control_input_F_z.insertTail(force_d.z);
-	control_input_tau_x.insertTail(torque_d.x);
-	control_input_tau_y.insertTail(torque_d.y);
+	control_input_tau_x.insertTail(0.0);
+	control_input_tau_y.insertTail(0.0);
 	control_input_tau_z.insertTail(torque_d.z);
 
 	for(int i=0; i<N_MHE+1; i++){
@@ -287,41 +234,34 @@ void mhe_get_measurements_control_inputs(){
 		MHE_measurements(9,i)=measurement_omega_x.getData(i);
 		MHE_measurements(10,i)=measurement_omega_y.getData(i);
 		MHE_measurements(11,i)=measurement_omega_z.getData(i);
-		MHE_measurements(12,i)=measurement_imu_acl_x.getData(i);
-		MHE_measurements(13,i)=measurement_imu_acl_y.getData(i);
-		MHE_measurements(14,i)=measurement_imu_acl_z.getData(i);
-		
-		MHE_control_inputs(0,i)=control_input_F_x.getData(i);
-		MHE_control_inputs(1,i)=control_input_F_y.getData(i);
-		MHE_control_inputs(2,i)=control_input_F_z.getData(i);
-		MHE_control_inputs(3,i)=control_input_tau_x.getData(i);
-		MHE_control_inputs(4,i)=control_input_tau_y.getData(i);
-		MHE_control_inputs(5,i)=control_input_tau_z.getData(i);
-	
+
+		if(i<N_MHE){
+			MHE_control_inputs(0,i)=control_input_F_x.getData(i);
+			MHE_control_inputs(1,i)=control_input_F_y.getData(i);
+			MHE_control_inputs(2,i)=control_input_F_z.getData(i);
+			MHE_control_inputs(3,i)=control_input_tau_x.getData(i);
+			MHE_control_inputs(4,i)=control_input_tau_y.getData(i);
+			MHE_control_inputs(5,i)=control_input_tau_z.getData(i);
+		}
 	}
 }
 
 void mhe_nlp_setting(){
-	
-	output_stage_cost_weight(12,12)=0.01;
-	output_stage_cost_weight(13,13)=0.01;
-	output_stage_cost_weight(14,14)=0.01;
-
 	for(int k=0; k<N_MHE+1; k++){
 		MX st=MHE_X(all_elem,k);
-		MX con=MHE_U(all_elem,k);
 		MX y_tilde=MHE_Y(all_elem,k);
-		MX H_xu=H(st,con);
-		obj+=mtimes(mtimes((y_tilde-H_xu).T(),output_stage_cost_weight),(y_tilde-H_xu));
+		MX H_x=H(st);
+		obj+=mtimes((y_tilde-H_x).T(),(y_tilde-H_x))*output_stage_cost_weight;
 		
 		if(k<N_MHE){
+			MX con=MHE_U(all_elem,k);
 			MX next_st=MHE_X(all_elem,k+1);
 			MX F_xu=F(st,con);
-			obj+=mtimes(mtimes((next_st-F_xu).T(),state_stage_cost_weight),(next_st-F_xu));
+			obj+=mtimes((next_st-F_xu).T(),(next_st-F_xu))*state_stage_cost_weight;
 		}
 	}
 	MX init_st=MHE_X(all_elem,0);
-	obj+=mtimes(mtimes((init_st-MHE_init_X_tilde).T(),arrival_cost_weight),(init_st-MHE_init_X_tilde));
+	obj+=mtimes((init_st-MHE_init_X_tilde).T(),(init_st-MHE_init_X_tilde))*arrival_cost_weight;
 
 	opti.minimize(obj);
 
@@ -334,8 +274,7 @@ void mhe_nlp_setting(){
 /*
 	for(int k=0;k<N_MHE+1;k++){
 		MX st=MHE_X(all_elem,k);
-		MX con=MHE_U(all_elem,k);
-		MX output_vec=H(st,con);//+MHE_V(all_elem,k);
+		MX output_vec=H(st);//+MHE_V(all_elem,k);
 		opti.subject_to(MHE_Y(all_elem,k)==output_vec);
 	}
 */
@@ -348,33 +287,16 @@ void mhe_nlp_setting(){
 	opti.subject_to(-0.7<=MHE_roll<=0.7);
 	opti.subject_to(-0.7<=MHE_pitch<=0.7);
 //	opti.subject_to(-PI<=MHE_yaw<=PI);
-//	opti.subject_to(-5<=MHE_omega_x<=5);
-//	opti.subject_to(-5<=MHE_omega_y<=5);
-//	opti.subject_to(-5<=MHE_omega_z<=5);
-//	opti.subject_to(-10<=MHE_F_ex<=10);
-//	opti.subject_to(-10<=MHE_F_ey<=10);
-//	opti.subject_to(-10<=MHE_F_ez<=10);
-//	opti.subject_to(-3<=MHE_tau_ex<=3);
-//	opti.subject_to(-3<=MHE_tau_ey<=3);
-//	opti.subject_to(-3<=MHE_tau_ez<=3);	
-	mhe_set_initial();	
+	opti.subject_to(-2<=MHE_omega_x<=2);
+	opti.subject_to(-2<=MHE_omega_y<=2);
+	opti.subject_to(-2<=MHE_omega_z<=2);
+	opti.subject_to(-5<=MHE_F_ex<=5);
+	opti.subject_to(-5<=MHE_F_ey<=5);
+//	opti.subject_to(-5<=MHE_F_ez<=5);
+	opti.subject_to(-3<=MHE_tau_ex<=3);
+	opti.subject_to(-3<=MHE_tau_ey<=3);
+	opti.subject_to(-3<=MHE_tau_ez<=3);	
 
-//	opti.set_initial(MHE_W,MHE_W_tilde);
-//	opti.set_initial(MHE_V,MHE_V_tilde);
-
-	solver_option["ipopt.max_iter"]=1000;
-	solver_option["print_time"]=0;
-	solver_option["ipopt.print_level"]=0;
-	solver_option["ipopt.tol"]=1e-0;
-	solver_option["ipopt.acceptable_tol"]=1e-0;
-	solver_option["ipopt.acceptable_obj_change_tol"]=1e-2;
-
-	opti.solver("ipopt",solver_option);	
-
-}
-
-void mhe_set_initial(){
-	
 	opti.set_initial(MHE_x_pos,0);
 	opti.set_initial(MHE_y_pos,0);
 	opti.set_initial(MHE_z_pos,0);
@@ -389,11 +311,23 @@ void mhe_set_initial(){
 	opti.set_initial(MHE_omega_z,0);
 	opti.set_initial(MHE_F_ex,0);
 	opti.set_initial(MHE_F_ey,0);
-	opti.set_initial(MHE_F_ez,0);
+	opti.set_initial(MHE_F_ez,-mass*g);
 	opti.set_initial(MHE_tau_ex,0);
 	opti.set_initial(MHE_tau_ey,0);
 	opti.set_initial(MHE_tau_ez,0);
-	
+
+//	opti.set_initial(MHE_W,MHE_W_tilde);
+//	opti.set_initial(MHE_V,MHE_V_tilde);
+
+	solver_option["ipopt.max_iter"]=100;
+	solver_option["print_time"]=0;
+	solver_option["ipopt.print_level"]=0;
+	solver_option["ipopt.tol"]=1e-0;
+	solver_option["ipopt.acceptable_tol"]=1e-0;
+	solver_option["ipopt.acceptable_obj_change_tol"]=1e-6;
+
+	opti.solver("ipopt",solver_option);	
+
 }
 
 void mhe_external_wrench_estimation(){
@@ -402,8 +336,7 @@ void mhe_external_wrench_estimation(){
 	opti.set_value(MHE_Y,MHE_measurements);
 	opti.set_value(MHE_U,MHE_control_inputs);
 	opti.set_value(MHE_sampling_time,delta_t.count());
-	opti.set_value(MHE_force_disturbance,MHE_force_dhat);
-//	opti.set_value(MHE_mass,mass);
+	opti.set_value(MHE_mass,mass);
 	
 	OptiSol sol=opti.solve();
 	MHE_X_star=sol.value(MHE_X);
@@ -465,23 +398,6 @@ void measurement_omega_Callback(const geometry_msgs::Vector3& msg){
 	omega=msg;
 }
 
-void measurement_imu_acl_Callback(const geometry_msgs::Vector3& msg){
-	imu_acl=msg;
-}
-
 void mass_Callback(const std_msgs::Float32& msg){
 	mass=msg.data;
-}
-
-void sbus_Callback(const std_msgs::Int16MultiArray::ConstPtr& array){
-	for(int i=0;i<10;i++){
-		Sbus[i]=map<int16_t>(array->data[i],352,1696,1000,2000);
-	}
-}
-
-void force_DOB_result_Callback(const geometry_msgs::Vector3& msg){
-	force_dhat=msg;
-	MHE_force_dhat(0)=force_dhat.x;
-	MHE_force_dhat(1)=force_dhat.y;
-	MHE_force_dhat(2)=force_dhat.z;
 }

@@ -51,6 +51,10 @@ geometry_msgs::Vector3 external_torque;
 geometry_msgs::Vector3 reference_position;
 geometry_msgs::Vector3 calculated_force;
 geometry_msgs::Vector3 non_bias_external_force;
+geometry_msgs::Vector3 adaptive_external_force;
+geometry_msgs::Vector3 adaptive_external_torque;
+geometry_msgs::Vector3 MoI;
+geometry_msgs::Vector3 force_dhat;
 
 double PWM_cmd[8]={1000., 1000., 1000., 1000., 1000., 1000., 1000., 1000.};
 double individual_motor_thrust[4]={0.0, 0.0, 0.0, 0.0};
@@ -62,6 +66,8 @@ double theta2=0.0;
 double desired_theta1=0.0;
 double desired_theta2=0.0;
 double mhe_delta_t=0.0;
+double mass=2.405;
+double adaptive_mhe_delta_t=0.0;
 
 void pos_callback(const geometry_msgs::Vector3& msg);
 void desired_pos_callback(const geometry_msgs::Vector3& msg);
@@ -89,7 +95,14 @@ void mhe_delta_t_callback(const std_msgs::Float32& msg);
 void reference_position_callback(const geometry_msgs::Vector3& msg);
 void calculated_force_callback(const geometry_msgs::Vector3& msg);
 void non_bias_external_force_callback(const geometry_msgs::Vector3& msg);
+void mass_callback(const std_msgs::Float32& msg);
+void adaptive_external_force_callback(const geometry_msgs::Vector3& msg);
+void adaptive_external_torque_callback(const geometry_msgs::Vector3& msg);
+void adaptive_mhe_delta_t_callback(const std_msgs::Float32& msg);
+void MoI_callback(const geometry_msgs::Vector3& msg);
+void force_dhat_callback(const geometry_msgs::Vector3& msg);
 void publisherSet();
+
 
 
 int main(int argc, char **argv)
@@ -112,7 +125,7 @@ int main(int argc, char **argv)
 	ros::Subscriber battery_voltage_log=nh.subscribe("/battery_voltage",1,battery_voltage_callback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber linear_velocity_log=nh.subscribe("/lin_vel",1,linear_velocity_callback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber desired_linear_velocity_log=nh.subscribe("/lin_vel_d",1,desired_linear_velocity_callback,ros::TransportHints().tcpNoDelay());
-	ros::Subscriber Center_of_Mass_log=nh.subscribe("/Center_of_Mass",1,center_of_mass_callback,ros::TransportHints().tcpNoDelay());
+	ros::Subscriber Center_of_Mass_log=nh.subscribe("/MHE_CoM",1,center_of_mass_callback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber bias_gradient_log=nh.subscribe("/bias_gradient",1,bias_gradient_callback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber filtered_bias_gradient_log=nh.subscribe("/filtered_bias_gradient",1,filtered_bias_gradient_callback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber angular_velocity_log=nh.subscribe("/angular_velocity",1,angular_velocity_callback,ros::TransportHints().tcpNoDelay());
@@ -123,6 +136,8 @@ int main(int argc, char **argv)
 	ros::Subscriber reference_position_log=nh.subscribe("/reference_position",1,reference_position_callback, ros::TransportHints().tcpNoDelay());
 	ros::Subscriber calculated_force_log=nh.subscribe("/calculated_force",1,calculated_force_callback, ros::TransportHints().tcpNoDelay());
 	ros::Subscriber non_bias_external_force_log=nh.subscribe("/non_bias_external_force",1,non_bias_external_force_callback, ros::TransportHints().tcpNoDelay());
+	ros::Subscriber force_dhat_sub=nh.subscribe("/force_dhat",1,force_dhat_callback, ros::TransportHints().tcpNoDelay());
+
 
 	data_log_publisher=nh.advertise<std_msgs::Float64MultiArray>("data_log",10);
 	ros::Timer timerPulish_log=nh.createTimer(ros::Duration(1.0/200.0), std::bind(publisherSet));
@@ -133,7 +148,7 @@ int main(int argc, char **argv)
 
 void publisherSet()
 {
-	data_log.data.resize(82);
+	data_log.data.resize(86);
 
 	data_log.data[0]=attitude.x;
 	data_log.data[1]=attitude.y;
@@ -217,6 +232,17 @@ void publisherSet()
 	data_log.data[79]=non_bias_external_force.x;	
 	data_log.data[80]=non_bias_external_force.y;	
 	data_log.data[81]=non_bias_external_force.z;	
+	data_log.data[82]=mass;
+	data_log.data[83]=force_dhat.x;
+	data_log.data[84]=force_dhat.y;
+	data_log.data[85]=force_dhat.z;
+//	data_log.data[83]=adaptive_external_force.x;
+//	data_log.data[84]=adaptive_external_force.y;
+//	data_log.data[85]=adaptive_external_force.z;
+//	data_log.data[86]=adaptive_external_torque.x;
+//	data_log.data[87]=adaptive_external_torque.y;
+//	data_log.data[88]=adaptive_external_torque.z;
+//	data_log.data[89]=adaptive_mhe_delta_t;	
 
 	data_log_publisher.publish(data_log);
 }
@@ -353,4 +379,28 @@ void calculated_force_callback(const geometry_msgs::Vector3& msg){
 
 void non_bias_external_force_callback(const geometry_msgs::Vector3& msg){
 	non_bias_external_force=msg;
+}
+
+void mass_callback(const std_msgs::Float32& msg){
+	mass=msg.data;
+}
+
+void adaptive_external_force_callback(const geometry_msgs::Vector3& msg){
+	adaptive_external_force=msg;
+}
+
+void adaptive_external_torque_callback(const geometry_msgs::Vector3& msg){
+	adaptive_external_torque=msg;
+}
+
+void adaptive_mhe_delta_t_callback(const std_msgs::Float32& msg){
+	adaptive_mhe_delta_t=msg.data;
+}
+
+void MoI_callback(const geometry_msgs::Vector3& msg){
+	MoI=msg;
+}
+
+void force_dhat_callback(const geometry_msgs::Vector3& msg){
+	force_dhat=msg;
 }

@@ -47,14 +47,14 @@
 
     <!-- FAC_MAV_Controller -->
 	<!--integration limits-->
-	<param name="attitude_integ_limit"	value="10.0"/>
+	<param name="attitude_integ_limit"	value="1.0"/>
 	<param name="altitude_integ_limit"	value="100.0"/>
-	<param name="position_integ_limit"	value="10.0"/>
+	<param name="position_integ_limit"	value="1.0"/>
 
 	<!--Center of mass-->
-	<param name="x_center_of_mass"		value="-0.01"/>	
-	<param name="y_center_of_mass"		value="0.003"/>	
-	<param name="z_center_of_mass"		value="-0.039"/> <!-- -0.058-->	
+	<param name="x_center_of_mass"		value="0.0"/>	<!-- 0.005  /  -0.01 -->
+	<param name="y_center_of_mass"		value="0.0"/>	<!-- 0.005  /  0.003 -->
+	<param name="z_center_of_mass"		value="-0.035"/> <!-- -0.035  /   -0.058-->	
 
 	<!--Conventional flight mode-->
     		<!--Conventional Mode attitude_rp gains-->
@@ -84,9 +84,9 @@
 	
 	<!--Tilt flight mode-->
 		<!--Tilt Mode attitude_rp gains-->
-		<param name="tilt_attitude_rp_P_gain"	value="2.25"/>	
+		<param name="tilt_attitude_rp_P_gain"	value="2.0"/>	
 		<param name="tilt_attitude_rp_I_gain"	value="0.2"/>
-		<param name="tilt_attitude_rp_D_gain"	value="0.5"/>
+		<param name="tilt_attitude_rp_D_gain"	value="0.45"/>
 
 		<!--Tilt Mode attitude_y gains-->
 		<param name="tilt_attitude_y_P_gain"	value="2.0"/>
@@ -106,10 +106,16 @@
 		<!--Tilt Mode Position gains-->
 		<param name="tilt_position_P_gain"	value="2.0"/>	
 		<param name="tilt_position_I_gain"	value="0.5"/>	
-		<param name="tilt_position_D_gain"	value="1.2"/>	
+		<param name="tilt_position_D_gain"	value="1.0"/>	
+	
+	<!--Moving Horizon Estimator-->
+		<param name="MHE_window_length" value="5"/>
 
     <node name="FAC_MAV_DOB_node"  pkg="FAC_MAV" type="FAC_MAV_DOB_ctrler"  output="screen"/>
-
+    <node name="external_wrench_estimator_node" pkg="external_wrench_nmhe" type="external_wrench_estimator" output="screen"/>
+<!-- <node name="adaptive_external_wrench_estimator_node" pkg="external_wrench_nmhe" type="adaptive_external_wrench_estimator" output="screen"/> -->
+<?ignore    <include file="$(find external_wrench_nmhe)/launch/external_wrench_estimator.launch">
+    </include> ?>
     <node pkg="data_logging" name="data_logging_node" type="data_logging"/>
 
     <!-- Rosbag -->

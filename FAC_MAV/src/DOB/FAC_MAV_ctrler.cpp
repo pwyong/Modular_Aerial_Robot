@@ -28,6 +28,8 @@ void filterCallback(const sensor_msgs::Imu& msg);
 void t265OdomCallback(const nav_msgs::Odometry::ConstPtr& msg);
 void external_force_Callback(const geometry_msgs::Vector3& msg);
 void external_torque_Callback(const geometry_msgs::Vector3& msg);
+void adaptive_external_force_Callback(const geometry_msgs::Vector3& msg);
+void adaptive_external_torque_Callback(const geometry_msgs::Vector3& msg);
 void pid_Gain_Setting();
 void disturbance_Observer();
 void sine_wave_vibration();
@@ -40,6 +42,8 @@ geometry_msgs::Vector3 calculated_force;
 
 geometry_msgs::Vector3 external_force;
 geometry_msgs::Vector3 external_torque;
+geometry_msgs::Vector3 adaptive_external_force;
+geometry_msgs::Vector3 adaptive_external_torque;
 
 void external_force_bias_eliminator();
 int eliminator_iter_num=0;
@@ -83,6 +87,8 @@ Eigen::MatrixXd invMQ_X_x_dot(3,1);
 Eigen::MatrixXd invMQ_X_x(3,1);
 Eigen::MatrixXd invMQ_Y_x_dot(3,1);
 Eigen::MatrixXd invMQ_Y_x(3,1);
+Eigen::MatrixXd invMQ_Z_x_dot(3,1);
+Eigen::MatrixXd invMQ_Z_x(3,1);
 Eigen::MatrixXd invMQ_A(3,3);
 Eigen::MatrixXd invMQ_B(3,1);
 Eigen::MatrixXd invMQ_C(1,3);
@@ -91,21 +97,37 @@ Eigen::MatrixXd Q_X_x_dot(3,1);
 Eigen::MatrixXd Q_X_x(3,1);
 Eigen::MatrixXd Q_Y_x_dot(3,1);
 Eigen::MatrixXd Q_Y_x(3,1);
+Eigen::MatrixXd Q_Z_x_dot(3,1);
+Eigen::MatrixXd Q_Z_x(3,1);
 Eigen::MatrixXd Q_A(3,3);
 Eigen::MatrixXd Q_B(3,1);
 Eigen::MatrixXd Q_C(1,3);
 
-double position_dob_fc=0.5;
-double position_dob_m=2.405;
+double position_dob_fc=0.1;
+double position_dob_m=2.42;
 
 double F_xd_tilde=0.0;
 double F_yd_tilde=0.0;
+double F_zd_tilde=0.0;
 double dhat_Fx=0.0;
 double dhat_Fy=0.0;
+double dhat_Fz=0.0;
 
 void positionDOB_setting();
 void positionDOB();
+
+ros::Publisher force_dhat_pub;
+geometry_msgs::Vector3 force_dhat;
 //-----------------------------------------
+
+//Mass update-----------------------------
+void mass_update();
+double updated_mass=0.0;
+double mass_x_dot=0.0;
+double mass_x=0.0;
+double mass_y=0.0;
+double mass_lpf_fc=0.1;
+//----------------------------------------
 int main(int argc, char **argv){
 	
     	ros::init(argc, argv,"t3_mav_controller");
@@ -192,7 +214,8 @@ int main(int argc, char **argv){
 		setCM();
         F_cmd << 0, 0, 0, 0;
 	//----------------------------------------------------------
-
+//	mass_x=mass/mass_lpf_fc;	
+	mass_topic.data=mass;
 	positionDOB_setting();
 
     PWMs = nh.advertise<std_msgs::Int16MultiArray>("PWMs", 1); // PWM 1,2,3,4
@@ -221,6 +244,8 @@ int main(int argc, char **argv){
 	reference_position_pub = nh.advertise<geometry_msgs::Vector3>("reference_position",1);
 	calculated_force_pub = nh.advertise<geometry_msgs::Vector3>("calculated_force",1);
 	non_bias_external_force_pub = nh.advertise<geometry_msgs::Vector3>("non_bias_external_force",1);
+	mass_pub = nh.advertise<std_msgs::Float32>("mass",1);
+	force_dhat_pub = nh.advertise<geometry_msgs::Vector3>("force_dhat",1);
 
     ros::Subscriber dynamixel_state = nh.subscribe("joint_states",100,jointstateCallback,ros::TransportHints().tcpNoDelay());
     ros::Subscriber att = nh.subscribe("/gx5/imu/data",1,imu_Callback,ros::TransportHints().tcpNoDelay());
@@ -231,6 +256,8 @@ int main(int argc, char **argv){
 	ros::Subscriber t265_odom=nh.subscribe("/rs_t265/odom/sample",100,t265OdomCallback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber external_force_sub=nh.subscribe("/external_force",1,external_force_Callback,ros::TransportHints().tcpNoDelay());
 	ros::Subscriber external_torque_sub=nh.subscribe("/external_torque",1,external_torque_Callback,ros::TransportHints().tcpNoDelay());
+	ros::Subscriber adaptive_external_force_sub=nh.subscribe("/adaptive_external_force",1,adaptive_external_force_Callback,ros::TransportHints().tcpNoDelay());
+	ros::Subscriber adaptive_external_torque_sub=nh.subscribe("/adaptvie_external_torque",1,adaptive_external_torque_Callback,ros::TransportHints().tcpNoDelay());
 	
 	ros::Timer timerPublish = nh.createTimer(ros::Duration(1.0/200.0),std::bind(publisherSet));
     ros::spin();
@@ -317,12 +344,14 @@ void publisherSet(){
 	angular_Acceleration.publish(angular_Accel);
 	sine_wave_data.publish(sine_wave);
 	disturbance.publish(dhat);
-	linear_acceleration.publish(lin_acl);
+	linear_acceleration.publish(imu_lin_acc);
 	bias_gradient.publish(bias_gradient_data);
 	filtered_bias_gradient.publish(filtered_bias_gradient_data);
 	reference_position_pub.publish(reference_position);
 	calculated_force_pub.publish(calculated_force);
 	non_bias_external_force_pub.publish(non_bias_external_force);
+	mass_pub.publish(mass_topic);
+	force_dhat_pub.publish(force_dhat);
 	prev_angular_Vel = imu_ang_vel;
 	prev_lin_vel = lin_vel;
 }
@@ -376,6 +405,10 @@ void rpyT_ctrl() {
 
 	if(position_mode || velocity_mode){
 		if(position_mode){
+
+			if(tilt_mode){
+				mass_update();
+			}
 		/*	if(!estimating){
 				X_d = X_d_base - XY_limit*(((double)Sbus[1]-(double)1500)/(double)500);
 				Y_d = Y_d_base + XY_limit*(((double)Sbus[3]-(double)1500)/(double)500);
@@ -398,9 +431,9 @@ void rpyT_ctrl() {
 				}
 		//	}
 			
-		//	if(pos.z < -0.2){
-		//		external_force_bias_eliminator();
-		//	}
+//			if(pos.z < -0.2){
+//				external_force_bias_eliminator();
+//			}
 		//	if(tilt_mode){	
 				admittance_controller();
 		//	}
@@ -526,8 +559,9 @@ void rpyT_ctrl() {
 	//--------------------------------------------------------
 	tautilde_r_d = tau_r_d - dhat_r;
 	tautilde_p_d = tau_p_d - dhat_p;
-	F_xd_tilde = F_xd - dhat_Fx;
-	F_yd_tilde = F_yd - dhat_Fy;
+	F_xd_tilde = F_xd;// - dhat_Fx;
+	F_yd_tilde = F_yd;// - dhat_Fy;
+	F_zd_tilde = F_zd;// - dhat_Fz;
 	//u << tau_r_d, tau_p_d, tau_y_d, F_zd;
 	u << tautilde_r_d, tautilde_p_d, tau_y_d, F_zd;
 	torque_d.x = tau_r_d;
@@ -759,6 +793,17 @@ void external_torque_Callback(const geometry_msgs::Vector3& msg){
 	external_torque=msg;
 }
 
+void adaptive_external_force_Callback(const geometry_msgs::Vector3& msg){
+	adaptive_external_force=msg;
+
+//	non_bias_external_force.x=external_force.x-f_ex_bias;
+//	non_bias_external_force.y=external_force.y-f_ey_bias;
+//	non_bias_external_force.z=external_force.z;
+}
+
+void adaptive_external_torque_Callback(const geometry_msgs::Vector3& msg){
+	adaptive_external_torque=msg;
+}
 
 void pid_Gain_Setting(){
 	if(!tilt_mode){
@@ -1075,16 +1120,17 @@ void state_Reader(){
 
 void admittance_controller(){
 	
-	if(fabs(external_force.x)<external_force_deadzone) external_force.x=0;
-	if(fabs(external_force.y)<external_force_deadzone) external_force.y=0;	
+	if(fabs(adaptive_external_force.x)<external_force_deadzone) adaptive_external_force.x=0;
+	if(fabs(adaptive_external_force.y)<external_force_deadzone) adaptive_external_force.y=0;	
+	if(fabs(adaptive_external_force.z)<external_force_deadzone) adaptive_external_force.z=0;	
 	
-	X_e_x1_dot=-D/M*X_e_x1-K/M*X_e_x2+non_bias_external_force.x;
+	X_e_x1_dot=-D/M*X_e_x1-K/M*X_e_x2+adaptive_external_force.x;
 	X_e_x2_dot=X_e_x1;
 	X_e_x1+=X_e_x1_dot*delta_t.count();
 	X_e_x2+=X_e_x2_dot*delta_t.count();
 	X_e=-1.0/M*X_e_x2;
 
-	Y_e_x1_dot=-D/M*Y_e_x1-K/M*Y_e_x2+non_bias_external_force.y;
+	Y_e_x1_dot=-D/M*Y_e_x1-K/M*Y_e_x2+adaptive_external_force.y;
 	Y_e_x2_dot=Y_e_x1;
 	Y_e_x1+=Y_e_x1_dot*delta_t.count();
 	Y_e_x2+=Y_e_x2_dot*delta_t.count();
@@ -1123,7 +1169,7 @@ void positionDOB(){
 	invMQ_X_x+=invMQ_X_x_dot*delta_t.count();
 	Eigen::MatrixXd invMQ_X_y = invMQ_C*invMQ_X_x;
 	
-	Q_X_x_dot = Q_A*Q_X_x+Q_B*force_d.x;
+	Q_X_x_dot = Q_A*Q_X_x+Q_B*position_dob_m*X_ddot_d;
 	Q_X_x+=Q_X_x_dot*delta_t.count();
 	Eigen::MatrixXd Q_X_y = Q_C*Q_X_x;
 
@@ -1133,11 +1179,25 @@ void positionDOB(){
 	invMQ_Y_x+=invMQ_Y_x_dot*delta_t.count();
 	Eigen::MatrixXd invMQ_Y_y = invMQ_C*invMQ_Y_x;
 	
-	Q_Y_x_dot = Q_A*Q_Y_x+Q_B*force_d.y;
+	Q_Y_x_dot = Q_A*Q_Y_x+Q_B*position_dob_m*Y_ddot_d;
 	Q_Y_x+=Q_Y_x_dot*delta_t.count();
 	Eigen::MatrixXd Q_Y_y = Q_C*Q_Y_x;
 
 	dhat_Fy = invMQ_Y_y(0) - Q_Y_y(0);		
+
+	invMQ_Z_x_dot=invMQ_A*invMQ_Z_x+invMQ_B*pos.z;
+	invMQ_Z_x+=invMQ_Z_x_dot*delta_t.count();
+	Eigen::MatrixXd invMQ_Z_y = invMQ_C*invMQ_Z_x;
+	
+	Q_Z_x_dot = Q_A*Q_Z_x+Q_B*position_dob_m*Z_ddot_d;
+	Q_Z_x+=Q_Z_x_dot*delta_t.count();
+	Eigen::MatrixXd Q_Z_y = Q_C*Q_Z_x;
+
+	dhat_Fz = invMQ_Z_y(0) - Q_Z_y(0);
+		
+	force_dhat.x=dhat_Fx;
+	force_dhat.y=dhat_Fy;
+	force_dhat.z=dhat_Fz;
 }
 
 void external_force_bias_eliminator(){
@@ -1159,4 +1219,32 @@ void external_force_bias_eliminator(){
 		ROS_INFO("Measuring complete!!!");
 	}		
 	
+}
+/*
+double err_F_ez_i = 0.0;
+double prev_F_ez = 0.0;
+double err_F_ez_integ_limit = 1.0;
+*/
+void mass_update(){ 
+	
+/*	
+	double err_F_ez = 0.0 - F_ez_y;
+	double mass_update_P = 0.1;
+	double mass_update_I = 1.0;
+	double mass_update_D = 0.0;
+
+	double F_ez_rate = (F_ez_y - prev_F_ez)/delta_t.count();
+	prev_F_ez = F_ez_y;
+
+	err_F_ez_i += err_F_ez*delta_t.count();
+
+	double mass_result = mass - (mass_update_P*err_F_ez + mass_update_I*err_F_ez_i - mass_update_D*F_ez_rate);
+*/
+	
+	mass_x_dot=-mass_lpf_fc*mass_x+external_force.z/g;
+	mass_x+=mass_x_dot*delta_t.count();
+	mass_y=mass_lpf_fc*mass_x;
+	
+	mass_topic.data=mass+mass_y;
+
 }

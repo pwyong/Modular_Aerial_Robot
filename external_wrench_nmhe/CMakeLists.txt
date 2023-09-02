@@ -146,6 +146,13 @@ target_link_libraries(external_wrench_estimator
   ${catkin_LIBRARIES}
   casadi
 )
+
+add_executable(adaptive_external_wrench_estimator src/adaptive_external_wrench_estimator.cpp)
+add_dependencies(adaptive_external_wrench_estimator ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(adaptive_external_wrench_estimator
+  ${catkin_LIBRARIES}
+  casadi
+)
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
