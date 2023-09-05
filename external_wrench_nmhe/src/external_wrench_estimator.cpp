@@ -305,7 +305,7 @@ void mhe_nlp_setting(){
 	
 	output_stage_cost_weight(12,12)=0.01;
 	output_stage_cost_weight(13,13)=0.01;
-	output_stage_cost_weight(14,14)=0.01;
+	output_stage_cost_weight(14,14)=0.005;
 
 	for(int k=0; k<N_MHE+1; k++){
 		MX st=MHE_X(all_elem,k);

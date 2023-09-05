@@ -78,6 +78,7 @@ std_msgs::Float32 battery_real_voltage;
 std_msgs::Float32 dt;
 geometry_msgs::Vector3 bias_gradient_data;
 geometry_msgs::Vector3 filtered_bias_gradient_data;
+std_msgs::Float32 mass_topic;
 
 bool servo_sw=false;
 double theta1_command, theta2_command;
@@ -93,6 +94,7 @@ bool altitude_mode = false;
 bool tilt_mode = false;
 bool ESC_control = false;
 bool DOB_mode = false;
+bool cart_mode = false;
 
 //State
 bool hovering = false;
@@ -183,7 +185,7 @@ int yaw_rotate_count = 0;
 
 static double r_arm = 0.109;// m // diagonal length between thruster : 218mm;
 static double l_servo = 0.015;
-static double mass = 2.405;//(Kg)
+static double mass = 2.42;//(Kg)
 
 
 //Propeller constants(DJI E800(3510 motors + 620S ESCs))
@@ -219,7 +221,7 @@ double z_c_hat=0.0;
 double integ_limit=10;
 double z_integ_limit=100;
 double pos_integ_limit=10;
-double vel_integ_limit=10;
+double vel_integ_limit=5;
 
 //Roll, Pitch PID gains
 double Pa=3.5;
@@ -361,6 +363,7 @@ ros::Publisher disturbance;
 ros::Publisher linear_acceleration;
 ros::Publisher bias_gradient;
 ros::Publisher filtered_bias_gradient;
+ros::Publisher mass_pub;
 //----------------------------------------------------
 
 //Control Matrix---------------------------------------
